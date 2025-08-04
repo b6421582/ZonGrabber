@@ -169,12 +169,46 @@ class ZonGrabberPanel {
     }
 
     async displayProductData(data) {
+        // 如果没有ASIN，尝试从URL中提取
+        if (!data.asin && data.url) {
+            const extractedAsin = this.extractAsinFromUrl(data.url);
+            if (extractedAsin) {
+                data.asin = extractedAsin;
+                data.asinSource = 'url';
+                console.log('从URL中补充提取到ASIN:', extractedAsin);
+            }
+        }
+
+        // 如果还是没有ASIN，尝试从当前页面URL提取
+        if (!data.asin) {
+            try {
+                const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (tabs[0] && tabs[0].url) {
+                    const extractedAsin = this.extractAsinFromUrl(tabs[0].url);
+                    if (extractedAsin) {
+                        data.asin = extractedAsin;
+                        data.asinSource = 'url';
+                        console.log('从当前页面URL中补充提取到ASIN:', extractedAsin);
+                    }
+                }
+            } catch (error) {
+                console.warn('无法获取当前页面URL:', error);
+            }
+        }
+
         // 自动添加联盟标识到URL，生成精简格式
         const affiliateTag = await this.getAffiliateTag();
         if (affiliateTag && data.asin) {
-            // 生成精简的联盟链接格式
+            // 生成精简的联盟链接格式：https://www.amazon.com/dp/ASIN?tag=affiliate-tag
             data.url = this.generateCleanAffiliateUrl(data.asin, affiliateTag);
             console.log('已生成精简联盟链接:', data.url);
+
+            // 同时保存原始URL（如果需要的话）
+            if (!data.originalUrl) {
+                data.originalUrl = data.url;
+            }
+        } else if (!data.asin) {
+            console.warn('无法生成联盟链接：缺少ASIN');
         }
 
         // 显示商品预览
@@ -262,7 +296,22 @@ class ZonGrabberPanel {
 
     showDataDetails(data) {
         // 基础信息
-        document.getElementById('detailASIN').textContent = data.asin || '-';
+        const asinElement = document.getElementById('detailASIN');
+        if (data.asin) {
+            asinElement.textContent = data.asin;
+            // 如果ASIN是从URL提取的，添加提示
+            if (data.asinSource === 'url') {
+                asinElement.title = 'ASIN从URL中提取';
+                asinElement.style.color = '#007bff';
+            } else {
+                asinElement.title = '';
+                asinElement.style.color = '';
+            }
+        } else {
+            asinElement.textContent = '-';
+            asinElement.title = '';
+            asinElement.style.color = '';
+        }
         document.getElementById('detailBrand').textContent = data.brand || '-';
         document.getElementById('detailCurrentPrice').textContent = data.currentPrice ? `$${data.currentPrice}` : '-';
         document.getElementById('detailOriginalPrice').textContent = data.originalPrice ? `$${data.originalPrice}` : '-';
@@ -509,32 +558,27 @@ class ZonGrabberPanel {
                 return;
             }
 
-            // 准备导出数据，包含计算的销售佣金
-            const exportDataObj = { ...this.currentProductData };
+            // 准备导出数据，清理空值和不需要的字段
+            const rawData = { ...this.currentProductData };
 
-            // 添加计算的销售佣金到联盟信息中
-            if (exportDataObj.affiliateInfo) {
-                const earningsElement = document.getElementById('affiliateEarnings');
-                if (earningsElement && earningsElement.textContent !== '-') {
-                    // 提取计算的佣金金额
-                    const earningsText = earningsElement.textContent || earningsElement.innerText;
-                    const earningsMatch = earningsText.match(/\$[\d.]+/);
-                    if (earningsMatch) {
-                        exportDataObj.affiliateInfo.calculatedEarnings = earningsMatch[0];
-                    }
-                }
-
-                // 确保联盟信息字段完整
-                if (!exportDataObj.affiliateInfo.category) {
-                    exportDataObj.affiliateInfo.category = document.getElementById('affiliateCategory')?.textContent || '';
-                }
-                if (!exportDataObj.affiliateInfo.commissionRate) {
-                    exportDataObj.affiliateInfo.commissionRate = document.getElementById('affiliateCommission')?.textContent || '';
+            // 如果没有ASIN，尝试从URL中提取
+            if (!rawData.asin && rawData.url) {
+                const extractedAsin = this.extractAsinFromUrl(rawData.url);
+                if (extractedAsin) {
+                    rawData.asin = extractedAsin;
+                    console.log('导出时从URL中补充提取到ASIN:', extractedAsin);
                 }
             }
 
-            // 添加导出时间戳
-            exportDataObj.exportedAt = new Date().toISOString();
+            // 确保使用简化的联盟链接
+            const affiliateTag = await this.getAffiliateTag();
+            if (affiliateTag && rawData.asin) {
+                rawData.url = this.generateCleanAffiliateUrl(rawData.asin, affiliateTag);
+                console.log('导出数据使用简化联盟链接:', rawData.url);
+            }
+
+            // 清理和优化导出数据
+            const exportDataObj = this.cleanExportData(rawData);
 
             const exportData = JSON.stringify(exportDataObj, null, 2);
             // 生成文件名，优先使用ASIN，其次使用商品标题的一部分
@@ -670,16 +714,21 @@ class ZonGrabberPanel {
         // 检测当前亚马逊域名
         let domain = 'amazon.com';
         try {
-            const currentUrl = window.location ? window.location.hostname : '';
-            if (currentUrl.includes('amazon.')) {
-                domain = currentUrl;
-            }
+            // 从当前标签页获取域名
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0] && tabs[0].url) {
+                    const url = new URL(tabs[0].url);
+                    if (url.hostname.includes('amazon.')) {
+                        domain = url.hostname.replace('www.', '');
+                    }
+                }
+            });
         } catch (error) {
             // 使用默认域名
         }
 
-        // 生成精简格式：https://www.amazon.com/dp/ASIN/?tag=affiliate-tag
-        const cleanUrl = `https://www.${domain}/dp/${asin}/?tag=${affiliateTag}`;
+        // 生成精简格式：https://www.amazon.com/dp/ASIN?tag=affiliate-tag
+        const cleanUrl = `https://www.${domain}/dp/${asin}?tag=${affiliateTag}`;
 
         console.log('生成精简联盟链接:', {
             asin: asin,
@@ -695,21 +744,27 @@ class ZonGrabberPanel {
     extractAsinFromUrl(url) {
         if (!url) return '';
 
+        console.log('从URL提取ASIN:', url);
+
         // 匹配各种ASIN格式
         const asinPatterns = [
-            /\/dp\/([A-Z0-9]{10})/i,
-            /\/gp\/product\/([A-Z0-9]{10})/i,
-            /\/product\/([A-Z0-9]{10})/i,
-            /asin=([A-Z0-9]{10})/i
+            /\/dp\/([A-Z0-9]{10})/i,           // /dp/ASIN
+            /\/gp\/product\/([A-Z0-9]{10})/i,  // /gp/product/ASIN
+            /\/product\/([A-Z0-9]{10})/i,      // /product/ASIN
+            /asin=([A-Z0-9]{10})/i,            // asin=ASIN
+            /\/([A-Z0-9]{10})(?:\/|\?|$)/i,    // 直接的ASIN格式
+            /\/([A-Z0-9]{10})(?:#.*)?$/i       // 末尾的ASIN
         ];
 
         for (const pattern of asinPatterns) {
             const match = url.match(pattern);
-            if (match) {
+            if (match && match[1]) {
+                console.log('成功从URL提取ASIN:', match[1], '使用模式:', pattern);
                 return match[1];
             }
         }
 
+        console.warn('无法从URL提取ASIN:', url);
         return '';
     }
 
@@ -717,6 +772,7 @@ class ZonGrabberPanel {
     async copyAffiliateUrl() {
         try {
             const urlInput = document.getElementById('affiliateUrl');
+            const copyBtn = document.getElementById('copyUrlBtn');
             const url = urlInput.value;
 
             if (!url || url === '未生成联盟链接') {
@@ -725,13 +781,23 @@ class ZonGrabberPanel {
             }
 
             await navigator.clipboard.writeText(url);
-            this.showMessage('联盟链接已复制到剪贴板', 'success');
+
+            // 更新按钮状态
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = '已复制!';
+            copyBtn.style.background = 'linear-gradient(135deg, #28a745, #20c997)';
+
+            this.showMessage('精简联盟链接已复制到剪贴板', 'success');
 
             // 选中文本以提供视觉反馈
             urlInput.select();
+
+            // 恢复按钮状态
             setTimeout(() => {
+                copyBtn.textContent = originalText;
+                copyBtn.style.background = '';
                 urlInput.blur();
-            }, 1000);
+            }, 2000);
 
         } catch (error) {
             console.error('复制失败:', error);
@@ -988,6 +1054,102 @@ class ZonGrabberPanel {
     updateCommissionRateDisplay(commissionRateText) {
         const commissionElement = document.getElementById('affiliateCommission');
         commissionElement.textContent = commissionRateText || '-';
+    }
+
+    // 清理导出数据，移除空值和不需要的字段
+    cleanExportData(data) {
+        const cleanData = {};
+
+        // 基础信息 - 只保留有值的字段
+        if (data.asin) cleanData.asin = data.asin;
+        if (data.title) cleanData.title = data.title;
+        if (data.brand) cleanData.brand = data.brand;
+        if (data.url) cleanData.url = data.url;
+
+        // 价格信息 - 只保留有值的字段
+        if (data.currentPrice) cleanData.currentPrice = data.currentPrice;
+        if (data.originalPrice) cleanData.originalPrice = data.originalPrice;
+        // priceRange 只有在有实际数据时才保留
+        if (data.priceRange && (data.priceRange.min || data.priceRange.max)) {
+            cleanData.priceRange = {};
+            if (data.priceRange.min) cleanData.priceRange.min = data.priceRange.min;
+            if (data.priceRange.max) cleanData.priceRange.max = data.priceRange.max;
+        }
+
+        // 评价信息
+        if (data.rating) cleanData.rating = data.rating;
+        if (data.reviewCount) cleanData.reviewCount = data.reviewCount;
+        if (data.bestSellerRank && data.bestSellerRank.trim()) cleanData.bestSellerRank = data.bestSellerRank;
+
+        // 库存和配送
+        if (data.stockStatus) cleanData.stockStatus = data.stockStatus;
+        if (data.shippingInfo) cleanData.shippingInfo = data.shippingInfo;
+        if (data.primeEligible !== undefined) cleanData.primeEligible = data.primeEligible;
+
+        // 商品详情
+        if (data.category) cleanData.category = data.category;
+
+        // 特性 - 只有非空数组才保留
+        if (data.features && Array.isArray(data.features) && data.features.length > 0) {
+            cleanData.features = data.features;
+        }
+
+        // 规格 - 只有非空对象才保留
+        if (data.specifications && typeof data.specifications === 'object' && Object.keys(data.specifications).length > 0) {
+            cleanData.specifications = data.specifications;
+        }
+
+        // 描述
+        if (data.description && data.description.trim()) cleanData.description = data.description;
+
+        // 变体信息 - 只保留有数据的变体类型
+        if (data.variants && typeof data.variants === 'object') {
+            const cleanVariants = {};
+            Object.keys(data.variants).forEach(key => {
+                if (Array.isArray(data.variants[key]) && data.variants[key].length > 0) {
+                    cleanVariants[key] = data.variants[key];
+                }
+            });
+            if (Object.keys(cleanVariants).length > 0) {
+                cleanData.variants = cleanVariants;
+            }
+        }
+
+        // 图片 - 只有非空数组才保留
+        if (data.images && Array.isArray(data.images) && data.images.length > 0) {
+            cleanData.images = data.images;
+        }
+
+        // 评论 - 只有非空数组才保留
+        if (data.reviews && Array.isArray(data.reviews) && data.reviews.length > 0) {
+            cleanData.reviews = data.reviews;
+        }
+
+        // 联盟信息 - 简化版本，只保留核心信息
+        if (data.affiliateInfo && data.affiliateInfo.siteStripeAvailable) {
+            const affiliateInfo = {};
+
+            if (data.affiliateInfo.category) affiliateInfo.category = data.affiliateInfo.category;
+            if (data.affiliateInfo.commissionRate) affiliateInfo.commissionRate = data.affiliateInfo.commissionRate;
+
+            // 添加计算的销售佣金
+            const earningsElement = document.getElementById('affiliateEarnings');
+            if (earningsElement && earningsElement.textContent !== '-') {
+                const earningsText = earningsElement.textContent || earningsElement.innerText;
+                const earningsMatch = earningsText.match(/\$[\d.]+/);
+                if (earningsMatch) {
+                    affiliateInfo.calculatedEarnings = earningsMatch[0];
+                }
+            }
+
+            // 只有在有实际数据时才添加联盟信息
+            if (Object.keys(affiliateInfo).length > 0) {
+                cleanData.affiliateInfo = affiliateInfo;
+            }
+        }
+
+        console.log('清理后的导出数据:', cleanData);
+        return cleanData;
     }
 }
 

@@ -230,24 +230,65 @@ function extractText(selectors, defaultValue = '') {
 
 // 提取ASIN
 function extractASIN() {
+  console.log('开始提取ASIN...');
+
   // 方法1: 从data-asin属性
   const asinElement = document.querySelector('[data-asin]');
-  if (asinElement) {
-    return asinElement.getAttribute('data-asin');
+  if (asinElement && asinElement.getAttribute('data-asin')) {
+    const asin = asinElement.getAttribute('data-asin');
+    console.log('从data-asin属性提取到ASIN:', asin);
+    return asin;
   }
-  
-  // 方法2: 从URL
-  const urlMatch = window.location.href.match(/\/dp\/([A-Z0-9]{10})/);
-  if (urlMatch) {
-    return urlMatch[1];
+
+  // 方法2: 从URL - 支持多种格式
+  const url = window.location.href;
+  console.log('当前URL:', url);
+
+  const urlPatterns = [
+    /\/dp\/([A-Z0-9]{10})/i,           // /dp/ASIN
+    /\/gp\/product\/([A-Z0-9]{10})/i,  // /gp/product/ASIN
+    /\/product\/([A-Z0-9]{10})/i,      // /product/ASIN
+    /asin=([A-Z0-9]{10})/i,            // asin=ASIN
+    /\/([A-Z0-9]{10})(?:\/|\?|$)/i     // 直接的ASIN格式
+  ];
+
+  for (const pattern of urlPatterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      console.log('从URL提取到ASIN:', match[1], '使用模式:', pattern);
+      return match[1];
+    }
   }
-  
+
   // 方法3: 从隐藏输入框
   const hiddenInput = document.querySelector('input[name="ASIN"]');
-  if (hiddenInput) {
-    return hiddenInput.value;
+  if (hiddenInput && hiddenInput.value) {
+    const asin = hiddenInput.value;
+    console.log('从隐藏输入框提取到ASIN:', asin);
+    return asin;
   }
-  
+
+  // 方法4: 从meta标签
+  const metaAsin = document.querySelector('meta[name="asin"]');
+  if (metaAsin && metaAsin.getAttribute('content')) {
+    const asin = metaAsin.getAttribute('content');
+    console.log('从meta标签提取到ASIN:', asin);
+    return asin;
+  }
+
+  // 方法5: 从页面脚本中查找
+  const scripts = document.querySelectorAll('script');
+  for (const script of scripts) {
+    if (script.textContent) {
+      const asinMatch = script.textContent.match(/"asin"\s*:\s*"([A-Z0-9]{10})"/i);
+      if (asinMatch) {
+        console.log('从脚本中提取到ASIN:', asinMatch[1]);
+        return asinMatch[1];
+      }
+    }
+  }
+
+  console.warn('未能提取到ASIN');
   return '';
 }
 
