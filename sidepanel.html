@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZonGrabber</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="header">
+            <div class="logo">
+                <img src="logo.png" alt="ZonGrabber">
+                <h1>ZonGrabber</h1>
+            </div>
+            <div class="version">v1.0.0</div>
+        </header>
+
+        <!-- 主要内容区域 -->
+        <main class="main-content">
+            <!-- 状态指示器 -->
+            <div class="status-bar">
+                <div class="status-indicator" id="statusIndicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">等待采集</span>
+                </div>
+            </div>
+
+            <!-- 联盟设置区域 -->
+            <div class="settings-section">
+                <div class="settings-header" id="settingsHeader">
+                    <h3>🔗 联盟设置</h3>
+                    <button class="collapse-btn" id="collapseBtn">▼</button>
+                </div>
+                <div class="settings-content" id="settingsContent">
+                    <div class="setting-item">
+                        <label for="affiliateTag">联盟标识 (Affiliate Tag):</label>
+                        <div class="input-group">
+                            <input type="text" id="affiliateTag" placeholder="例如: nichetools0e-20" value="nichetools0e-20" />
+                            <button id="saveTagBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>💡 设置后，导出的URL将自动包含您的联盟标识</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="minEarnings">最低销售佣金要求 ($):</label>
+                        <div class="input-group">
+                            <input type="number" id="minEarnings" placeholder="例如: 2.00" step="0.01" min="0" max="100" />
+                            <button id="saveEarningsBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>💰 低于此销售佣金的商品将标红提示</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="minRating">最低评分要求:</label>
+                        <div class="input-group">
+                            <input type="number" id="minRating" placeholder="3.5" step="0.1" min="1" max="5" value="3.5" />
+                            <button id="saveRatingBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>⭐ 低于此评分的商品将标红提示</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <div class="setting-note">
+                            <small>📋 <strong>推荐条件</strong>: 销售佣金达标 + 有评论数据 + 评分达标</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 操作按钮区域 -->
+            <div class="action-section">
+                <button class="btn btn-primary" id="extractBtn">
+                    <span class="btn-icon">📊</span>
+                    采集商品数据
+                </button>
+                <button class="btn btn-secondary" id="refreshBtn">
+                    <span class="btn-icon">🔄</span>
+                    刷新页面
+                </button>
+            </div>
+
+            <!-- 商品信息预览 -->
+            <div class="product-preview" id="productPreview" style="display: none;">
+                <h3>商品信息预览</h3>
+                <div class="preview-content">
+                    <div class="product-image">
+                        <img id="productImage" src="" alt="商品图片">
+                    </div>
+                    <div class="product-info">
+                        <h4 id="productTitle">商品标题</h4>
+                        <div class="product-meta">
+                            <span class="brand" id="productBrand">品牌</span>
+                            <span class="asin" id="productASIN">ASIN</span>
+                        </div>
+                        <div class="price-info">
+                            <span class="current-price" id="currentPrice">价格</span>
+                            <span class="rating" id="productRating">评分</span>
+                        </div>
+                        <div class="earnings-status" id="earningsStatus" style="display: none;">
+                            <!-- 佣金状态将在这里显示 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数据详情 -->
+            <div class="data-details" id="dataDetails" style="display: none;">
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="basic">基础信息</button>
+                    <button class="tab-btn" data-tab="affiliate">联盟信息</button>
+                    <button class="tab-btn" data-tab="reviews">评论数据</button>
+                    <button class="tab-btn" data-tab="variants">变体信息</button>
+                    <button class="tab-btn" data-tab="raw">原始数据</button>
+                </div>
+
+                <div class="tab-content">
+                    <!-- 基础信息标签页 -->
+                    <div class="tab-pane active" id="basicTab">
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <label>ASIN:</label>
+                                <span id="detailASIN">-</span>
+                            </div>
+                            <div class="info-item">
+                                <label>品牌:</label>
+                                <span id="detailBrand">-</span>
+                            </div>
+                            <div class="info-item">
+                                <label>当前价格:</label>
+                                <span id="detailCurrentPrice">-</span>
+                            </div>
+                            <div class="info-item">
+                                <label>原价:</label>
+                                <span id="detailOriginalPrice">-</span>
+                            </div>
+                            <div class="info-item">
+                                <label>评分:</label>
+                                <span id="detailRating">-</span>
+                            </div>
+                            <div class="info-item">
+                                <label>评论数:</label>
+                                <span id="detailReviewCount">-</span>
+                            </div>
+                            <div class="info-item">
+                                <label>库存状态:</label>
+                                <span id="detailStockStatus">-</span>
+                            </div>
+                            <div class="info-item">
+                                <label>分类:</label>
+                                <span id="detailCategory">-</span>
+                            </div>
+                            <div class="info-item affiliate-url-item">
+                                <label>联盟链接:</label>
+                                <div class="url-container">
+                                    <input type="text" id="affiliateUrl" readonly />
+                                    <button id="copyUrlBtn" class="btn btn-small">复制</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 联盟信息标签页 -->
+                    <div class="tab-pane" id="affiliateTab">
+                        <div class="affiliate-info">
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <label>SiteStripe状态:</label>
+                                    <span id="siteStripeStatus">检查中...</span>
+                                </div>
+                                <div class="info-item">
+                                    <label>商品分类:</label>
+                                    <span id="affiliateCategory">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <label>佣金率:</label>
+                                    <span id="affiliateCommission">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <label>销售佣金:</label>
+                                    <span id="affiliateEarnings">-</span>
+                                </div>
+                            </div>
+
+
+                        </div>
+                    </div>
+
+                    <!-- 评论数据标签页 -->
+                    <div class="tab-pane" id="reviewsTab">
+                        <div class="reviews-summary">
+                            <h4>评论概览</h4>
+                            <div id="reviewsSummary">暂无数据</div>
+                        </div>
+                        <div class="reviews-list">
+                            <h4>精选评论</h4>
+                            <div id="reviewsList">暂无数据</div>
+                        </div>
+                    </div>
+
+                    <!-- 变体信息标签页 -->
+                    <div class="tab-pane" id="variantsTab">
+                        <div class="variants-info">
+                            <h4>商品变体</h4>
+                            <div id="variantsInfo">暂无数据</div>
+                        </div>
+                    </div>
+
+                    <!-- 原始数据标签页 -->
+                    <div class="tab-pane" id="rawTab">
+                        <div class="raw-data">
+                            <textarea id="rawDataText" readonly></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+        </main>
+
+        <!-- 底部工具栏 -->
+        <footer class="footer">
+            <div class="export-section">
+                <button class="btn btn-export" id="exportJsonBtn">
+                    <span class="btn-icon">📥</span>
+                    导出JSON数据
+                </button>
+            </div>
+        </footer>
+
+        <!-- 加载指示器 -->
+        <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">正在采集数据...</div>
+        </div>
+
+        <!-- 消息提示 -->
+        <div class="message-toast" id="messageToast" style="display: none;">
+            <span class="message-text"></span>
+        </div>
+    </div>
+
+    <script src="sidepanel.js"></script>
+</body>
+</html>
