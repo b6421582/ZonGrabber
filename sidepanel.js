@@ -828,10 +828,9 @@ class ZonGrabberPanel {
     // 加载最低销售佣金设置
     loadMinEarnings() {
         chrome.storage.local.get(['minEarnings'], (result) => {
-            if (result.minEarnings) {
-                document.getElementById('minEarnings').value = result.minEarnings;
-                console.log('已加载最低销售佣金设置:', result.minEarnings);
-            }
+            const earnings = result.minEarnings || 2.00;
+            document.getElementById('minEarnings').value = earnings;
+            console.log('已加载最低销售佣金设置:', earnings);
         });
     }
 
@@ -883,14 +882,11 @@ class ZonGrabberPanel {
         const isRecommended = checks.earningsOk && checks.reviewsOk && checks.ratingOk;
 
         if (isRecommended) {
-            // 推荐商品 - 绿色
+            // 推荐商品 - 绿色，分行显示
             statusElement.className = 'earnings-status good';
             statusElement.innerHTML = `
-                <span class="status-icon">✅</span>
-                <strong>推荐商品</strong>
-                <div class="status-details">
-                    💰 佣金: $${checks.earnings.toFixed(2)} | ⭐ 评分: ${checks.rating} | 💬 评论: ${checks.reviewCount}
-                </div>
+                <div><span class="status-icon">✅</span><strong>推荐</strong></div>
+                <div>💰 $${checks.earnings.toFixed(2)} | ⭐ ${checks.rating} | 💬 ${checks.reviewCount}</div>
             `;
         } else {
             // 不推荐商品 - 红色
@@ -898,22 +894,19 @@ class ZonGrabberPanel {
             let reasons = [];
 
             if (!checks.earningsOk && checks.minEarnings > 0) {
-                reasons.push(`佣金低($${checks.earnings.toFixed(2)}<$${checks.minEarnings.toFixed(2)})`);
+                reasons.push(`💰 $${checks.earnings.toFixed(2)}<$${checks.minEarnings.toFixed(2)}`);
             }
             if (!checks.reviewsOk) {
-                reasons.push('无评论数据');
+                reasons.push('💬 无评论');
             }
             if (!checks.ratingOk) {
                 const minRating = await this.getMinRating();
-                reasons.push(`评分低(${checks.rating}<${minRating})`);
+                reasons.push(`⭐ ${checks.rating}<${minRating}`);
             }
 
             statusElement.innerHTML = `
-                <span class="status-icon">❌</span>
-                <strong>不推荐</strong>
-                <div class="status-details">
-                    ${reasons.join(' | ')}
-                </div>
+                <div><span class="status-icon">❌</span><strong>不推荐</strong></div>
+                <div>${reasons.join(' | ')}</div>
             `;
         }
     }
@@ -1005,7 +998,7 @@ class ZonGrabberPanel {
     async getMinEarnings() {
         return new Promise((resolve) => {
             chrome.storage.local.get(['minEarnings'], (result) => {
-                resolve(result.minEarnings || 0);
+                resolve(result.minEarnings || 2.00);
             });
         });
     }
@@ -1013,10 +1006,9 @@ class ZonGrabberPanel {
     // 加载最低评分设置
     loadMinRating() {
         chrome.storage.local.get(['minRating'], (result) => {
-            if (result.minRating) {
-                document.getElementById('minRating').value = result.minRating;
-                console.log('已加载最低评分设置:', result.minRating);
-            }
+            const rating = result.minRating || 3.5;
+            document.getElementById('minRating').value = rating;
+            console.log('已加载最低评分设置:', rating);
         });
     }
 
