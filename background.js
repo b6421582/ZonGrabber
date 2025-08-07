@@ -75,6 +75,27 @@ async function handleGetProductData(request, sender, sendResponse) {
       throw new Error('无法获取当前标签页');
     }
 
+    // 检查标签页状态
+    if (currentTab.status !== 'complete') {
+      throw new Error('页面还在加载中，请等待页面完全加载后重试');
+    }
+
+    // 先检查content script是否已注入
+    try {
+      await chrome.tabs.sendMessage(currentTab.id, { action: 'ping' });
+    } catch (pingError) {
+      console.log('Content script未响应，尝试重新注入...');
+
+      // 重新注入content script
+      await chrome.scripting.executeScript({
+        target: { tabId: currentTab.id },
+        files: ['content.js']
+      });
+
+      // 等待一下让脚本初始化
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
     // 向content script请求数据
     const response = await chrome.tabs.sendMessage(currentTab.id, {
       action: 'extractProductData'
@@ -97,11 +118,52 @@ async function handleGetListProducts(request, sender, sendResponse) {
       throw new Error('无法获取当前标签页');
     }
 
-    // 向content script请求列表数据
-    const response = await chrome.tabs.sendMessage(currentTab.id, {
-      action: 'extractListProducts',
-      filters: request.filters || {}
-    });
+    // 检查标签页状态
+    if (currentTab.status !== 'complete') {
+      throw new Error('页面还在加载中，请等待页面完全加载后重试');
+    }
+
+    // 先检查content script是否已注入
+    try {
+      await chrome.tabs.sendMessage(currentTab.id, { action: 'ping' });
+    } catch (pingError) {
+      console.log('Content script未响应，尝试重新注入...');
+
+      // 重新注入content script
+      await chrome.scripting.executeScript({
+        target: { tabId: currentTab.id },
+        files: ['content.js']
+      });
+
+      // 等待一下让脚本初始化
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // 向content script请求列表数据，增加重试机制
+    let response;
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (retryCount < maxRetries) {
+      try {
+        response = await chrome.tabs.sendMessage(currentTab.id, {
+          action: 'extractListProducts',
+          filters: request.filters || {}
+        });
+        break; // 成功则跳出循环
+      } catch (messageError) {
+        retryCount++;
+        console.warn(`消息发送失败，重试 ${retryCount}/${maxRetries}:`, messageError);
+
+        if (retryCount >= maxRetries) {
+          throw new Error(`消息通道连接失败，已重试${maxRetries}次。请刷新页面后重试。`);
+        }
+
+        // 等待后重试
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
     sendResponse({ success: true, data: response });
   } catch (error) {
     console.error('获取列表商品数据失败:', error);

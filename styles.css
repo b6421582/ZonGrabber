@@ -569,7 +569,8 @@ body {
     font-size: 13px;
     font-weight: 600;
     border-radius: 6px;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -894,9 +895,10 @@ body {
 /* 导出按钮区域 */
 .export-section {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     gap: 8px;
     padding: 0 2px;
+    flex-wrap: wrap;
 }
 
 /* 底部工具栏 */
@@ -1016,4 +1018,148 @@ body {
         font-size: 10px;
         min-width: 45px;
     }
+}
+
+/* 批量采集样式 */
+.batch-collection-section {
+    margin-bottom: 16px;
+}
+
+.upload-section {
+    margin-bottom: 16px;
+}
+
+.upload-area {
+    border: 2px dashed #007bff;
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+    background: #f8f9fa;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    user-select: none;
+    position: relative;
+}
+
+.upload-area:hover {
+    border-color: #0056b3;
+    background: #e3f2fd;
+}
+
+.upload-area.dragover {
+    border-color: #28a745;
+    background: #d4edda;
+}
+
+.upload-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.upload-text {
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.upload-text p {
+    margin: 0 0 4px 0;
+    font-weight: 600;
+    color: #333;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.upload-text small {
+    color: #666;
+    font-size: 12px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.file-info {
+    background: #e8f5e8;
+    border: 1px solid #28a745;
+    border-radius: 6px;
+    padding: 12px;
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.file-info span {
+    flex: 1;
+    font-size: 13px;
+}
+
+.batch-settings {
+    margin-bottom: 16px;
+}
+
+.batch-progress {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 16px;
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.progress-header h4 {
+    margin: 0;
+    font-size: 14px;
+    color: #333;
+}
+
+.progress-stats {
+    font-size: 13px;
+    color: #666;
+    font-weight: 600;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #28a745, #20c997);
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.progress-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.progress-item {
+    text-align: center;
+    font-size: 12px;
+    color: #666;
+}
+
+.progress-item span {
+    font-weight: 600;
+}
+
+.progress-controls {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
 }

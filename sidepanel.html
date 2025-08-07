@@ -14,7 +14,7 @@
                 <img src="logo.png" alt="ZonGrabber">
                 <h1>ZonGrabber</h1>
             </div>
-            <div class="version">v1.4.0</div>
+            <div class="version">v1.6.0</div>
         </header>
 
         <!-- 主要内容区域 -->
@@ -24,6 +24,83 @@
                 <div class="status-indicator" id="statusIndicator">
                     <span class="status-dot"></span>
                     <span class="status-text">等待采集</span>
+                </div>
+            </div>
+
+            <!-- 批量采集区域 -->
+            <div class="batch-collection-section" id="batchCollectionSection" style="display: none;">
+                <div class="setting-header">
+                    <h3>📁 批量采集</h3>
+                </div>
+
+                <!-- 文件上传区域 -->
+                <div class="upload-section">
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-icon">📄</div>
+                        <div class="upload-text">
+                            <p>拖拽文件到此处或点击选择</p>
+                            <small>支持 .txt 和 .json 格式</small>
+                        </div>
+                    </div>
+                    <input type="file" id="fileInput" accept=".txt,.json" style="display: none;">
+                    <div class="file-info" id="fileInfo" style="display: none;">
+                        <span id="fileName"></span>
+                        <span id="fileCount"></span>
+                        <button id="clearFileBtn" class="btn btn-small">清除</button>
+                    </div>
+                </div>
+
+                <!-- 批量采集设置 -->
+                <div class="batch-settings">
+                    <div class="setting-item">
+                        <label for="batchInterval">采集间隔 (秒):</label>
+                        <div class="input-group">
+                            <input type="number" id="batchInterval" min="1" max="10" value="3" />
+                            <button id="saveBatchIntervalBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>⏱️ 防止触发反爬机制</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="maxRetries">失败重试次数:</label>
+                        <div class="input-group">
+                            <input type="number" id="maxRetries" min="0" max="3" value="2" />
+                            <button id="saveMaxRetriesBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>🔄 采集失败时的重试次数</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 批量采集进度 -->
+                <div class="batch-progress" id="batchProgress" style="display: none;">
+                    <div class="progress-header">
+                        <h4>采集进度</h4>
+                        <div class="progress-stats">
+                            <span id="progressText">0/0 (0%)</span>
+                        </div>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-details">
+                        <div class="progress-item">
+                            <span>成功: <span id="successCount">0</span></span>
+                        </div>
+                        <div class="progress-item">
+                            <span>失败: <span id="failedCount">0</span></span>
+                        </div>
+                        <div class="progress-item">
+                            <span>当前: <span id="currentItem">等待开始</span></span>
+                        </div>
+                    </div>
+                    <div class="progress-controls">
+                        <button id="pauseBtn" class="btn btn-small">⏸️ 暂停</button>
+                        <button id="stopBtn" class="btn btn-small">⏹️ 停止</button>
+                    </div>
                 </div>
             </div>
 
@@ -140,8 +217,33 @@
                     </div>
 
                     <div class="setting-item">
+                        <label for="maxPages">翻页采集页数:</label>
+                        <div class="input-group">
+                            <input type="number" id="maxPages" placeholder="例如: 3" min="1" max="20" value="1" />
+                            <button id="saveMaxPagesBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>📄 设置采集的最大页数 (1-20页，建议不超过5页)</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="pageDelay">页面延迟 (秒):</label>
+                        <div class="input-group">
+                            <input type="number" id="pageDelay" placeholder="例如: 3" min="1" max="10" value="3" />
+                            <button id="savePageDelayBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>⏱️ 翻页间隔时间，避免触发反爬机制</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
                         <div class="setting-note">
                             <small>📋 <strong>筛选条件</strong>: 销量达标 + 评分达标 + 评论数达标 + 品牌匹配</small>
+                        </div>
+                        <div class="setting-note">
+                            <small>📄 <strong>翻页采集</strong>: 自动采集多页商品，合并结果导出</small>
                         </div>
                     </div>
                 </div>
@@ -303,6 +405,10 @@
                 <button class="btn btn-export" id="exportBtn">
                     <span class="btn-icon" id="exportBtnIcon">📥</span>
                     <span id="exportBtnText">导出商品数据</span>
+                </button>
+                <button class="btn btn-export" id="exportLinksBtn" style="display: none;">
+                    <span class="btn-icon">🔗</span>
+                    <span>导出链接</span>
                 </button>
             </div>
         </footer>

@@ -1,10 +1,13 @@
-// ZonGrabber 侧边栏脚本
+// ZonGrabber 侧边栏脚本 v1.6.0
 
 class ZonGrabberPanel {
     constructor() {
         this.currentProductData = null;
         this.currentPageType = 'unknown';
         this.pageCheckInterval = null;
+        this.selectedUrls = [];
+        this.batchCollector = null;
+
         console.log('ZonGrabber: 面板初始化');
         this.init();
 
@@ -81,6 +84,15 @@ class ZonGrabberPanel {
             this.saveSortBy();
         });
 
+        // 翻页设置相关按钮
+        document.getElementById('saveMaxPagesBtn').addEventListener('click', () => {
+            this.saveMaxPages();
+        });
+
+        document.getElementById('savePageDelayBtn').addEventListener('click', () => {
+            this.savePageDelay();
+        });
+
         // 列表设置折叠功能
         document.getElementById('listCollapseBtn').addEventListener('click', () => {
             this.toggleListSettings();
@@ -89,6 +101,11 @@ class ZonGrabberPanel {
         // 导出按钮 - 根据页面类型调用不同功能
         document.getElementById('exportBtn').addEventListener('click', () => {
             this.handleExportClick();
+        });
+
+        // 添加导出链接按钮事件监听
+        document.getElementById('exportLinksBtn').addEventListener('click', () => {
+            this.exportLinksData();
         });
 
 
@@ -108,7 +125,7 @@ class ZonGrabberPanel {
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             const currentTab = tabs[0];
 
-            console.log('ZonGrabber: 开始检查页面状态，URL =', currentTab.url);
+
 
             const pageType = this.getPageType(currentTab.url);
             this.handlePageTypeChanged(pageType, currentTab.url);
@@ -127,8 +144,8 @@ class ZonGrabberPanel {
         console.log('ZonGrabber: 检测页面URL =', url);
 
         if (!url || !url.includes('amazon.')) {
-            console.log('ZonGrabber: 非亚马逊页面');
-            return 'unknown';
+            console.log('ZonGrabber: 非亚马逊页面，切换到批量采集模式');
+            return 'batch';
         }
 
         if (url.includes('/dp/') || url.includes('/gp/product/')) {
@@ -148,8 +165,8 @@ class ZonGrabberPanel {
             return 'store';
         }
 
-        console.log('ZonGrabber: 未知的亚马逊页面类型');
-        return 'unknown';
+        console.log('ZonGrabber: 未知的亚马逊页面类型，切换到批量采集模式');
+        return 'batch';
     }
 
     // 根据页面类型更新UI
@@ -176,7 +193,9 @@ class ZonGrabberPanel {
             exportBtn.style.display = 'block';
             exportBtnIcon.textContent = '📥';
             exportBtnText.textContent = '导出单品';
+            document.getElementById('exportLinksBtn').style.display = 'none';
             listSettings.style.display = 'none';
+            this.hideBatchCollectionInterface();
         } else if (['search', 'category', 'store'].includes(pageType)) {
             // 列表页：显示列表采集功能
             console.log('ZonGrabber: 🔄 切换到列表页模式');
@@ -185,14 +204,23 @@ class ZonGrabberPanel {
             extractBtnText.textContent = '采集列表';
             exportBtn.style.display = 'block';
             exportBtnIcon.textContent = '📋';
-            exportBtnText.textContent = '导出列表';
+            exportBtnText.textContent = '导出完整';
+            document.getElementById('exportLinksBtn').style.display = 'block';
             listSettings.style.display = 'block';
+            this.hideBatchCollectionInterface();
         } else {
-            // 其他页面：隐藏功能
-            console.log('ZonGrabber: ❌ 非亚马逊页面，隐藏功能');
-            extractBtn.style.display = 'none';
-            exportBtn.style.display = 'none';
+            // 其他页面：显示批量采集功能
+            console.log('ZonGrabber: 🔄 切换到批量采集模式');
+            this.currentPageType = 'batch'; // 设置为批量采集模式
+            extractBtn.style.display = 'block';
+            extractBtnIcon.textContent = '📁';
+            extractBtnText.textContent = '批量采集';
+            exportBtn.style.display = 'block';
+            exportBtnIcon.textContent = '📥';
+            exportBtnText.textContent = '下载归档';
+            document.getElementById('exportLinksBtn').style.display = 'none';
             listSettings.style.display = 'none';
+            this.showBatchCollectionInterface();
         }
     }
 
@@ -215,8 +243,12 @@ class ZonGrabberPanel {
         } else if (['search', 'category', 'store'].includes(this.currentPageType)) {
             console.log('ZonGrabber: 执行列表采集');
             this.extractListProducts();
+        } else if (this.currentPageType === 'batch') {
+            console.log('ZonGrabber: 执行批量采集');
+            this.startBatchCollection();
         } else {
-            this.showMessage('请在亚马逊页面使用此功能', 'error');
+            console.log('ZonGrabber: 切换到批量采集模式');
+            this.startBatchCollection();
         }
     }
 
@@ -231,12 +263,20 @@ class ZonGrabberPanel {
             console.log('ZonGrabber: 执行列表导出');
             this.exportListData();
         } else {
-            this.showMessage('没有可导出的数据', 'warning');
+            // 批量采集模式 - 下载ZIP
+
+            this.downloadBatchZip();
         }
     }
 
     async extractProductData() {
         try {
+            // 检查是否为批量采集模式
+            if (this.currentPageType === 'batch') {
+                await this.startBatchCollection();
+                return;
+            }
+
             this.showLoading(true);
             this.updateStatus('active', '正在采集数据...');
 
@@ -345,23 +385,55 @@ class ZonGrabberPanel {
             const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => {
                     reject(new Error('列表商品采集超时，请刷新页面后重试'));
-                }, 60000); // 60秒超时
+                }, 180000); // 3分钟超时
             });
 
-            // 发送消息给background script请求列表数据
-            const dataPromise = chrome.runtime.sendMessage({
-                action: 'getListProducts',
-                filters: filters
-            });
+            // 发送消息给background script请求列表数据，增加重试机制
+            let response;
+            let retryCount = 0;
+            const maxRetries = 3;
 
-            // 使用Promise.race来实现超时
-            const response = await Promise.race([dataPromise, timeoutPromise]);
+            while (retryCount < maxRetries) {
+                try {
+                    const dataPromise = chrome.runtime.sendMessage({
+                        action: 'getListProducts',
+                        filters: filters
+                    });
+
+                    // 使用Promise.race来实现超时
+                    response = await Promise.race([dataPromise, timeoutPromise]);
+
+                    if (response && response.success) {
+                        break; // 成功则跳出循环
+                    } else if (response && response.error) {
+                        throw new Error(response.error);
+                    }
+                } catch (error) {
+                    retryCount++;
+                    console.warn(`列表采集失败，重试 ${retryCount}/${maxRetries}:`, error);
+
+                    if (retryCount >= maxRetries) {
+                        throw new Error(`列表采集失败，已重试${maxRetries}次。错误: ${error.message}`);
+                    }
+
+                    // 如果是消息通道错误，等待更长时间
+                    if (error.message && error.message.includes('back/forward cache')) {
+                        this.updateStatus('active', `消息通道重连中... (${retryCount}/${maxRetries})`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+            }
 
             if (response && response.success) {
                 this.currentProductData = response.data;
                 this.displayListProductsData(response.data);
                 this.updateStatus('ready', '列表采集完成');
-                this.showMessage(`成功采集 ${response.data.totalFiltered} 个商品！`, 'success');
+
+                const data = response.data;
+                const pagesInfo = data.pagesCollected ? `${data.pagesCollected}页` : '1页';
+                this.showMessage(`成功采集 ${pagesInfo}，共 ${data.totalFiltered} 个有效商品！`, 'success');
             } else {
                 throw new Error(response?.error || '列表商品采集失败');
             }
@@ -1365,7 +1437,9 @@ class ZonGrabberPanel {
             minRating: parseFloat(document.getElementById('minListRating').value) || 0,
             minReviews: parseInt(document.getElementById('minReviews').value) || 0,
             brandFilter: document.getElementById('brandFilter').value.trim(),
-            sortBy: document.getElementById('sortBy').value || 'sales'
+            sortBy: document.getElementById('sortBy').value || 'sales',
+            maxPages: parseInt(document.getElementById('maxPages').value) || 1,
+            pageDelay: parseInt(document.getElementById('pageDelay').value) || 3
         };
     }
 
@@ -1394,6 +1468,7 @@ class ZonGrabberPanel {
     // 显示列表汇总信息
     displayListSummary(data) {
         // 更新基础信息标签页显示汇总
+        const pagesInfo = data.pagesCollected ? `${data.pagesCollected}/${data.maxPages}页` : '1页';
         document.getElementById('detailASIN').textContent = `共 ${data.totalFiltered} 个商品`;
         document.getElementById('detailBrand').textContent = data.filters.brandFilter || '无品牌筛选';
         document.getElementById('detailCurrentPrice').textContent = `最低销量: ${data.filters.minSales}`;
@@ -1401,7 +1476,7 @@ class ZonGrabberPanel {
         document.getElementById('detailRating').textContent = `最低评论数: ${data.filters.minReviews}`;
         document.getElementById('detailReviewCount').textContent = `排序方式: ${this.getSortByText(data.filters.sortBy)}`;
         document.getElementById('detailStockStatus').textContent = `总找到: ${data.totalFound} 个`;
-        document.getElementById('detailCategory').textContent = `采集时间: ${new Date(data.extractedAt).toLocaleString()}`;
+        document.getElementById('detailCategory').textContent = `采集页数: ${pagesInfo}`;
     }
 
     // 获取排序方式文本
@@ -1419,7 +1494,7 @@ class ZonGrabberPanel {
     loadListSettings() {
         chrome.storage.local.get([
             'minSales', 'minListRating', 'minReviews',
-            'brandFilter', 'sortBy'
+            'brandFilter', 'sortBy', 'maxPages', 'pageDelay'
         ], (result) => {
             if (result.minSales !== undefined) {
                 document.getElementById('minSales').value = result.minSales;
@@ -1435,6 +1510,12 @@ class ZonGrabberPanel {
             }
             if (result.sortBy !== undefined) {
                 document.getElementById('sortBy').value = result.sortBy;
+            }
+            if (result.maxPages !== undefined) {
+                document.getElementById('maxPages').value = result.maxPages;
+            }
+            if (result.pageDelay !== undefined) {
+                document.getElementById('pageDelay').value = result.pageDelay;
             }
         });
     }
@@ -1479,6 +1560,28 @@ class ZonGrabberPanel {
         });
     }
 
+    // 保存最大页数设置
+    saveMaxPages() {
+        const maxPages = parseInt(document.getElementById('maxPages').value) || 1;
+        const validMaxPages = Math.max(1, Math.min(20, maxPages)); // 限制在1-20之间
+        document.getElementById('maxPages').value = validMaxPages;
+
+        chrome.storage.local.set({ maxPages: validMaxPages }, () => {
+            this.showMessage(`最大页数设置已保存: ${validMaxPages}页`, 'success');
+        });
+    }
+
+    // 保存页面延迟设置
+    savePageDelay() {
+        const pageDelay = parseInt(document.getElementById('pageDelay').value) || 3;
+        const validPageDelay = Math.max(1, Math.min(10, pageDelay)); // 限制在1-10秒之间
+        document.getElementById('pageDelay').value = validPageDelay;
+
+        chrome.storage.local.set({ pageDelay: validPageDelay }, () => {
+            this.showMessage(`页面延迟设置已保存: ${validPageDelay}秒`, 'success');
+        });
+    }
+
     // 切换列表设置显示
     toggleListSettings() {
         const content = document.getElementById('listSettingsContent');
@@ -1491,6 +1594,712 @@ class ZonGrabberPanel {
             content.style.display = 'none';
             btn.textContent = '▶';
         }
+    }
+
+    // 显示批量采集界面
+    showBatchCollectionInterface() {
+        const batchSection = document.getElementById('batchCollectionSection');
+        if (batchSection) {
+            batchSection.style.display = 'block';
+
+            // 延迟初始化事件，确保DOM元素已渲染
+            setTimeout(() => {
+                this.initBatchCollectionEvents();
+            }, 100);
+        }
+    }
+
+    // 隐藏批量采集界面
+    hideBatchCollectionInterface() {
+        const batchSection = document.getElementById('batchCollectionSection');
+        if (batchSection) {
+            batchSection.style.display = 'none';
+        }
+    }
+
+    // 初始化批量采集事件
+    initBatchCollectionEvents() {
+        // 文件上传相关事件
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+
+        if (!uploadArea || !fileInput) {
+            console.error('上传区域或文件输入元素未找到');
+            return;
+        }
+
+        // 防止重复绑定事件
+        if (uploadArea.dataset.eventsInitialized) {
+            console.log('事件已初始化，跳过');
+            return;
+        }
+        uploadArea.dataset.eventsInitialized = 'true';
+        console.log('初始化文件上传事件');
+
+        // 点击上传区域触发文件选择
+        const clickHandler = (e) => {
+            console.log('点击上传区域，事件目标:', e.target);
+            e.preventDefault();
+            e.stopPropagation();
+
+            // 重置文件输入，确保可以重复选择同一文件
+            fileInput.value = '';
+
+            // 触发文件选择对话框
+            setTimeout(() => {
+                try {
+                    fileInput.click();
+                    console.log('触发文件选择对话框');
+                } catch (error) {
+                    console.error('触发文件选择失败:', error);
+                    // 备用方案：创建新的文件输入元素
+                    const newInput = document.createElement('input');
+                    newInput.type = 'file';
+                    newInput.accept = '.txt,.json';
+                    newInput.style.display = 'none';
+                    newInput.onchange = (e) => {
+                        if (e.target.files && e.target.files[0]) {
+                            this.handleFileSelect(e.target.files[0]);
+                        }
+                        document.body.removeChild(newInput);
+                    };
+                    document.body.appendChild(newInput);
+                    newInput.click();
+                }
+            }, 10);
+        };
+
+        uploadArea.addEventListener('click', clickHandler);
+
+        // 为所有子元素也添加点击事件
+        const uploadIcon = uploadArea.querySelector('.upload-icon');
+        const uploadText = uploadArea.querySelector('.upload-text');
+
+        if (uploadIcon) {
+            uploadIcon.addEventListener('click', clickHandler);
+        }
+        if (uploadText) {
+            uploadText.addEventListener('click', clickHandler);
+            const p = uploadText.querySelector('p');
+            const small = uploadText.querySelector('small');
+            if (p) p.addEventListener('click', clickHandler);
+            if (small) small.addEventListener('click', clickHandler);
+        }
+
+        // 文件选择变化事件
+        const changeHandler = (e) => {
+            console.log('文件选择变化:', e.target.files);
+            if (e.target.files && e.target.files.length > 0) {
+                this.handleFileSelect(e.target.files[0]);
+            }
+        };
+
+        fileInput.addEventListener('change', changeHandler);
+
+        // 确保文件输入元素可以被触发
+        fileInput.style.pointerEvents = 'none';
+        fileInput.style.position = 'absolute';
+        fileInput.style.left = '-9999px';
+
+        // 拖拽上传事件
+        uploadArea.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 只有当鼠标真正离开uploadArea时才移除样式
+            if (!uploadArea.contains(e.relatedTarget)) {
+                uploadArea.classList.remove('dragover');
+            }
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.remove('dragover');
+
+            const files = e.dataTransfer.files;
+            if (files && files.length > 0) {
+                this.handleFileSelect(files[0]);
+            }
+        });
+
+        // 清除文件
+        document.getElementById('clearFileBtn').addEventListener('click', () => {
+            this.clearSelectedFile();
+        });
+
+        // 测试文件输入是否可用
+        console.log('文件输入元素状态:', {
+            exists: !!fileInput,
+            type: fileInput?.type,
+            accept: fileInput?.accept,
+            style: fileInput?.style.display
+        });
+
+        // 设置保存
+        document.getElementById('saveBatchIntervalBtn').addEventListener('click', () => {
+            this.saveBatchInterval();
+        });
+
+        document.getElementById('saveMaxRetriesBtn').addEventListener('click', () => {
+            this.saveMaxRetries();
+        });
+
+        // 进度控制
+        document.getElementById('pauseBtn').addEventListener('click', () => {
+            this.pauseBatchCollection();
+        });
+
+        document.getElementById('stopBtn').addEventListener('click', () => {
+            this.stopBatchCollection();
+        });
+
+        // 加载设置
+        this.loadBatchSettings();
+    }
+
+    // 处理文件选择
+    handleFileSelect(file) {
+        if (!file) {
+            console.log('没有选择文件');
+            return;
+        }
+
+        console.log('选择的文件:', file.name, file.type, file.size);
+
+        // 检查文件大小 (限制为10MB)
+        if (file.size > 10 * 1024 * 1024) {
+            this.showMessage('文件太大，请选择小于10MB的文件', 'error');
+            return;
+        }
+
+        // 检查文件类型
+        const allowedTypes = ['text/plain', 'application/json'];
+        const fileExtension = file.name.toLowerCase().split('.').pop();
+        const allowedExtensions = ['txt', 'json'];
+
+        if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
+            this.showMessage('请选择 .txt 或 .json 格式的文件', 'error');
+            return;
+        }
+
+        this.showMessage('正在解析文件...', 'info');
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const content = e.target.result;
+                console.log('文件内容长度:', content.length);
+
+                const urls = this.parseFileContent(content, file.type || `text/${fileExtension === 'json' ? 'json' : 'plain'}`);
+
+                if (urls.length === 0) {
+                    this.showMessage('文件中没有找到有效的亚马逊商品链接', 'warning');
+                    return;
+                }
+
+                this.selectedUrls = urls;
+                this.showFileInfo(file.name, urls.length);
+                this.showMessage(`成功解析 ${urls.length} 个商品链接`, 'success');
+
+            } catch (error) {
+                console.error('文件解析失败:', error);
+                this.showMessage('文件解析失败: ' + error.message, 'error');
+            }
+        };
+
+        reader.onerror = () => {
+            this.showMessage('文件读取失败', 'error');
+        };
+
+        reader.readAsText(file, 'UTF-8');
+    }
+
+    // 解析文件内容
+    parseFileContent(content, fileType) {
+        let urls = [];
+
+        try {
+            if (fileType.includes('json')) {
+                // 解析JSON文件
+                console.log('解析JSON文件...');
+                const data = JSON.parse(content);
+
+                // 支持多种JSON格式
+                let products = [];
+                if (Array.isArray(data)) {
+                    products = data;
+                } else if (data.products && Array.isArray(data.products)) {
+                    products = data.products;
+                } else if (data.data && Array.isArray(data.data)) {
+                    products = data.data;
+                } else {
+                    throw new Error('JSON格式不支持，请确保包含products数组');
+                }
+
+                urls = products
+                    .map(product => {
+                        // 支持多种URL字段名
+                        return product.url || product.link || product.href || product.productUrl;
+                    })
+                    .filter(url => url && this.isAmazonUrl(url))
+                    .map(url => this.cleanAmazonUrl(url));
+
+            } else {
+                // 解析TXT文件
+                console.log('解析TXT文件...');
+                urls = content.split(/[\r\n]+/)
+                    .map(line => line.trim())
+                    .filter(line => line && this.isAmazonUrl(line))
+                    .map(url => this.cleanAmazonUrl(url));
+            }
+        } catch (error) {
+            console.error('文件解析错误:', error);
+            throw new Error(`文件格式错误: ${error.message}`);
+        }
+
+        // 去重并过滤无效URL
+        const uniqueUrls = [...new Set(urls)].filter(url => url && url.length > 0);
+        console.log(`解析结果: 原始${urls.length}个，去重后${uniqueUrls.length}个`);
+
+        return uniqueUrls;
+    }
+
+    // 检查是否为亚马逊URL
+    isAmazonUrl(url) {
+        return url.includes('amazon.com') && (url.includes('/dp/') || url.includes('/gp/product/'));
+    }
+
+    // 清理亚马逊URL
+    cleanAmazonUrl(url) {
+        const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/i);
+        if (asinMatch) {
+            return `https://www.amazon.com/dp/${asinMatch[1]}`;
+        }
+        return url;
+    }
+
+    // 提取ASIN
+    extractASIN(url) {
+        const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/i);
+        return asinMatch ? asinMatch[1].toUpperCase() : `UNKNOWN_${Date.now()}`;
+    }
+
+    // 显示文件信息
+    showFileInfo(fileName, urlCount) {
+        document.getElementById('fileName').textContent = fileName;
+        document.getElementById('fileCount').textContent = `${urlCount} 个链接`;
+        document.getElementById('fileInfo').style.display = 'flex';
+        document.getElementById('uploadArea').style.display = 'none';
+    }
+
+    // 清除选择的文件
+    clearSelectedFile() {
+        this.selectedUrls = [];
+        document.getElementById('fileInfo').style.display = 'none';
+        document.getElementById('uploadArea').style.display = 'block';
+        document.getElementById('fileInput').value = '';
+    }
+
+    // 加载批量采集设置
+    loadBatchSettings() {
+        chrome.storage.local.get(['batchInterval', 'maxRetries'], (result) => {
+            if (result.batchInterval !== undefined) {
+                document.getElementById('batchInterval').value = result.batchInterval;
+            }
+            if (result.maxRetries !== undefined) {
+                document.getElementById('maxRetries').value = result.maxRetries;
+            }
+        });
+    }
+
+    // 保存采集间隔设置
+    saveBatchInterval() {
+        const interval = parseInt(document.getElementById('batchInterval').value) || 3;
+        const validInterval = Math.max(1, Math.min(10, interval));
+        document.getElementById('batchInterval').value = validInterval;
+
+        chrome.storage.local.set({ batchInterval: validInterval }, () => {
+            this.showMessage(`采集间隔设置已保存: ${validInterval}秒`, 'success');
+        });
+    }
+
+    // 保存重试次数设置
+    saveMaxRetries() {
+        const retries = parseInt(document.getElementById('maxRetries').value) || 2;
+        const validRetries = Math.max(0, Math.min(3, retries));
+        document.getElementById('maxRetries').value = validRetries;
+
+        chrome.storage.local.set({ maxRetries: validRetries }, () => {
+            this.showMessage(`重试次数设置已保存: ${validRetries}次`, 'success');
+        });
+    }
+
+    // 开始批量采集
+    async startBatchCollection() {
+        if (!this.selectedUrls || this.selectedUrls.length === 0) {
+            this.showMessage('请先选择包含商品链接的文件', 'warning');
+            return;
+        }
+
+        // 初始化批量采集状态
+        this.batchCollector = new BatchCollector(this.selectedUrls, {
+            interval: parseInt(document.getElementById('batchInterval').value) || 3,
+            maxRetries: parseInt(document.getElementById('maxRetries').value) || 2
+        });
+
+        // 显示进度界面
+        this.showBatchProgress();
+
+        // 开始采集
+        try {
+            await this.batchCollector.start((progress) => {
+                this.updateBatchProgress(progress);
+            });
+
+            console.log('批量采集完成，采集到的商品数量:', this.batchCollector.collectedProducts.size);
+            this.showMessage('批量采集完成！', 'success');
+            this.enableZipDownload();
+
+        } catch (error) {
+            this.showMessage('批量采集失败: ' + error.message, 'error');
+        }
+    }
+
+    // 显示批量采集进度
+    showBatchProgress() {
+        document.getElementById('batchProgress').style.display = 'block';
+        this.updateBatchProgress({
+            total: this.selectedUrls.length,
+            completed: 0,
+            failed: 0,
+            current: '准备开始...'
+        });
+    }
+
+    // 更新批量采集进度
+    updateBatchProgress(progress) {
+        const { total, completed, failed, current } = progress;
+        const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+        document.getElementById('progressText').textContent = `${completed}/${total} (${percentage}%)`;
+        document.getElementById('progressFill').style.width = `${percentage}%`;
+        document.getElementById('successCount').textContent = completed - failed;
+        document.getElementById('failedCount').textContent = failed;
+        document.getElementById('currentItem').textContent = current;
+    }
+
+    // 暂停批量采集
+    pauseBatchCollection() {
+        if (this.batchCollector) {
+            this.batchCollector.pause();
+            this.showMessage('批量采集已暂停', 'info');
+        }
+    }
+
+    // 停止批量采集
+    stopBatchCollection() {
+        if (this.batchCollector) {
+            this.batchCollector.stop();
+            this.showMessage('批量采集已停止', 'info');
+            this.enableZipDownload();
+        }
+    }
+
+    // 启用ZIP下载
+    enableZipDownload() {
+        const exportBtn = document.getElementById('exportBtn');
+        exportBtn.disabled = false;
+        exportBtn.style.opacity = '1';
+    }
+
+
+
+    // 下载批量采集的文件
+    async downloadBatchZip() {
+        try {
+
+
+            if (!this.batchCollector || this.batchCollector.collectedProducts.size === 0) {
+                this.showMessage('没有可下载的数据，请先进行批量采集', 'warning');
+                return;
+            }
+
+            // 直接使用文件夹下载方案
+            await this.downloadBatchDataAsFiles();
+
+        } catch (error) {
+            console.error('批量下载失败:', error);
+            this.showMessage('批量下载失败: ' + error.message, 'error');
+        }
+    }
+
+
+
+    // 批量下载文件（创建ZIP包含所有独立JSON文件）
+    async downloadBatchDataAsFiles() {
+        try {
+            if (!this.batchCollector || this.batchCollector.collectedProducts.size === 0) {
+                this.showMessage('没有可下载的数据', 'warning');
+                return;
+            }
+
+            this.showMessage('正在创建ZIP文件，包含所有独立的JSON文件...', 'info');
+
+
+            // 创建ZIP文件
+            const zipBlob = await this.createManualZip();
+
+            // 生成文件名
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+            const filename = `amazon_products_${timestamp}.txt`;
+
+            // 下载ZIP文件
+            const url = URL.createObjectURL(zipBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            this.showMessage(`✅ 归档文件下载成功: ${filename}，包含 ${this.batchCollector.collectedProducts.size} 个独立的JSON文件`, 'success');
+
+        } catch (error) {
+            console.error('ZIP创建失败:', error);
+            this.showMessage('ZIP创建失败，使用逐个下载方式', 'warning');
+            await this.downloadAsTraditionalFiles();
+        }
+    }
+
+    // 手动创建ZIP文件（包含所有独立的JSON文件）
+    async createManualZip() {
+
+
+        const files = [];
+
+        // 为每个商品创建独立的JSON文件
+        for (const [asin, productData] of this.batchCollector.collectedProducts) {
+            const cleanedData = this.cleanProductDataForExport(productData);
+            files.push({
+                name: `${asin}.json`,
+                content: JSON.stringify(cleanedData, null, 2)
+            });
+
+        }
+
+        // 添加失败链接文件（如果有）
+        if (this.batchCollector.failedUrls.length > 0) {
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+            const failedContent = this.batchCollector.failedUrls
+                .map(item => `${item.url} - ${item.error} (尝试${item.attempts}次)`)
+                .join('\n');
+            files.push({
+                name: `failed_links_${timestamp}.txt`,
+                content: failedContent
+            });
+
+        }
+
+
+
+        // 使用简单的ZIP格式创建
+        return this.createSimpleZipBlob(files);
+    }
+
+    // 创建简单的ZIP格式文件
+    createSimpleZipBlob(files) {
+        // 由于手动创建ZIP格式比较复杂，我们使用一个更简单的方案：
+        // 创建一个tar.gz风格的文本文件，包含所有JSON文件的内容
+
+        let zipContent = `# Amazon Products Archive
+# Created by ZonGrabber on ${new Date().toLocaleString()}
+# This archive contains ${files.length} files
+# Each JSON file represents one product's complete data
+
+`;
+
+        files.forEach((file, index) => {
+            zipContent += `\n${'='.repeat(80)}\n`;
+            zipContent += `FILE: ${file.name}\n`;
+            zipContent += `SIZE: ${file.content.length} bytes\n`;
+            zipContent += `INDEX: ${index + 1}/${files.length}\n`;
+            zipContent += `${'='.repeat(80)}\n`;
+            zipContent += file.content;
+            zipContent += `\n${'='.repeat(80)}\n`;
+            zipContent += `END OF FILE: ${file.name}\n`;
+            zipContent += `${'='.repeat(80)}\n\n`;
+        });
+
+        zipContent += `\n\n# Archive Summary
+# Total files: ${files.length}
+# Archive created: ${new Date().toISOString()}
+#
+# To extract individual JSON files:
+# 1. Search for "FILE: filename.json"
+# 2. Copy content between the separator lines
+# 3. Save as individual .json files
+#
+# Each product has its own complete JSON data structure.
+`;
+
+        return new Blob([zipContent], { type: 'text/plain' });
+    }
+
+
+
+    // 传统下载方式（逐个下载JSON文件）
+    async downloadAsTraditionalFiles() {
+        try {
+            this.showMessage('开始下载商品文件，每个商品一个独立的JSON文件...', 'info');
+
+            let downloadCount = 0;
+            const totalFiles = this.batchCollector.collectedProducts.size;
+
+            console.log(`准备下载 ${totalFiles} 个独立的JSON文件:`);
+
+            // 逐个下载每个商品文件
+            for (const [asin, productData] of this.batchCollector.collectedProducts) {
+                try {
+                    const cleanedData = this.cleanProductDataForExport(productData);
+
+
+                    this.downloadFile(
+                        `${asin}.json`,
+                        JSON.stringify(cleanedData, null, 2),
+                        'application/json'
+                    );
+
+                    downloadCount++;
+                    this.showMessage(`下载进度: ${downloadCount}/${totalFiles} - ${asin}.json`, 'info');
+
+                    // 减少延迟，提高下载速度
+                    await new Promise(resolve => setTimeout(resolve, 100));
+
+                } catch (error) {
+                    console.error(`下载商品 ${asin} 失败:`, error);
+                }
+            }
+
+            // 下载失败链接文件（如果有）
+            if (this.batchCollector.failedUrls.length > 0) {
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+                const failedContent = this.batchCollector.failedUrls
+                    .map(item => `${item.url} - ${item.error} (尝试${item.attempts}次)`)
+                    .join('\n');
+
+                this.downloadFile(
+                    `failed_links_${timestamp}.txt`,
+                    failedContent,
+                    'text/plain'
+                );
+                console.log('下载失败链接文件: failed_links_' + timestamp + '.txt');
+            }
+
+            console.log('所有文件下载完成，每个商品都是独立的JSON文件');
+            this.showMessage(`✅ 成功下载 ${downloadCount} 个独立的商品JSON文件！每个商品一个文件。`, 'success');
+
+        } catch (error) {
+            console.error('传统下载失败:', error);
+            this.showMessage('下载失败: ' + error.message, 'error');
+        }
+    }
+
+
+
+    // 清理商品数据用于导出
+    cleanProductDataForExport(product) {
+        // 移除不需要的内部字段，保留完整的商品信息
+        const cleaned = { ...product };
+
+        // 移除内部使用的字段
+        delete cleaned.source;
+
+        // 确保URL包含联盟标识
+        const affiliateTag = this.getAffiliateTag();
+        if (cleaned.url && affiliateTag) {
+            cleaned.url = this.addAffiliateTagToUrl(cleaned.url, affiliateTag);
+        }
+
+        // 添加导出时间戳
+        cleaned.exportedAt = new Date().toISOString();
+
+        return cleaned;
+    }
+
+    // 添加联盟标识到URL
+    addAffiliateTagToUrl(url, affiliateTag) {
+        try {
+            const urlObj = new URL(url);
+            urlObj.searchParams.set('tag', affiliateTag);
+            return urlObj.toString();
+        } catch (error) {
+            console.warn('添加联盟标识失败:', error);
+            return url;
+        }
+    }
+
+    // 获取联盟标识
+    getAffiliateTag() {
+        const input = document.getElementById('affiliateTag');
+        return input ? input.value.trim() : '';
+    }
+
+    // 下载文件到指定文件夹（使用Chrome Downloads API）
+    async downloadFileToFolder(filename, content, mimeType, folderName) {
+        try {
+            // 创建Blob
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+
+            // 使用Chrome Downloads API下载到指定文件夹
+            const downloadId = await chrome.downloads.download({
+                url: url,
+                filename: `${folderName}/${filename}`,
+                saveAs: false // 不显示保存对话框，直接下载到默认位置
+            });
+
+
+
+            // 清理URL
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+            }, 1000);
+
+            return downloadId;
+
+        } catch (error) {
+            console.error(`下载文件 ${filename} 失败:`, error);
+            // 如果Chrome Downloads API失败，回退到传统方法
+            this.downloadFile(filename, content, mimeType);
+        }
+    }
+
+    // 下载单个文件（传统方法，作为备用）
+    downloadFile(filename, content, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     }
 
     // 导出列表数据
@@ -1543,6 +2352,63 @@ class ZonGrabberPanel {
         } catch (error) {
             console.error('导出列表数据失败:', error);
             this.showMessage('导出列表数据失败: ' + error.message, 'error');
+        }
+    }
+
+    // 导出链接数据
+    async exportLinksData() {
+        try {
+            if (!this.currentProductData || !this.currentProductData.products) {
+                this.showMessage('没有可导出的链接数据，请先采集列表商品', 'warning');
+                return;
+            }
+
+            // 提取所有URL并去重
+            const urls = [];
+            const urlSet = new Set();
+
+            this.currentProductData.products.forEach(product => {
+                if (product.url && product.url.trim()) {
+                    const cleanUrl = product.url.trim();
+                    if (!urlSet.has(cleanUrl)) {
+                        urlSet.add(cleanUrl);
+                        urls.push(cleanUrl);
+                    }
+                }
+            });
+
+            if (urls.length === 0) {
+                this.showMessage('没有有效的链接数据可导出', 'warning');
+                return;
+            }
+
+            // 生成文件名
+            const brandFilter = this.currentProductData.filters?.brandFilter || '';
+            const fileIdentifier = brandFilter ? brandFilter.replace(/[^a-zA-Z0-9]/g, '_') : 'list';
+            const filename = `amazon_links_${fileIdentifier}_${this.getDateString()}.txt`;
+
+            // 创建下载链接 - 每行一个URL
+            const dataStr = urls.join('\n');
+            const blob = new Blob([dataStr], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+
+            // 创建临时下载链接
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // 清理URL
+            URL.revokeObjectURL(url);
+
+            this.showMessage(`成功导出 ${urls.length} 个去重链接`, 'success');
+
+        } catch (error) {
+            console.error('导出链接数据失败:', error);
+            this.showMessage('导出链接数据失败: ' + error.message, 'error');
         }
     }
 
@@ -1600,7 +2466,7 @@ class ZonGrabberPanel {
         console.log('ZonGrabber: 设置页面变化监听');
 
         // 监听来自background的页面变化通知
-        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        chrome.runtime.onMessage.addListener((message) => {
             if (message.action === 'pageTypeChanged') {
                 console.log('ZonGrabber: 收到页面变化通知', message);
                 this.handlePageTypeChanged(message.pageType, message.url);
@@ -1650,7 +2516,7 @@ class ZonGrabberPanel {
             }
         } catch (error) {
             // 静默处理错误，不显示给用户
-            console.log('ZonGrabber: 静默页面检查失败', error);
+
         }
     }
 
@@ -1660,8 +2526,10 @@ class ZonGrabberPanel {
             this.updateStatus('ready', '准备采集单品');
         } else if (['search', 'category', 'store'].includes(pageType)) {
             this.updateStatus('ready', '准备采集列表');
-        } else if (pageType === 'unknown') {
-            this.updateStatus('error', '请打开亚马逊页面');
+        } else if (pageType === 'batch') {
+            this.updateStatus('ready', '准备批量采集');
+        } else {
+            this.updateStatus('ready', '准备批量采集');
         }
     }
 
@@ -1671,6 +2539,529 @@ class ZonGrabberPanel {
         if (this.pageCheckInterval) {
             clearInterval(this.pageCheckInterval);
             this.pageCheckInterval = null;
+        }
+    }
+}
+
+// 批量采集器类
+class BatchCollector {
+    constructor(urls, options = {}) {
+        this.urls = urls;
+        this.options = {
+            interval: options.interval || 3,
+            maxRetries: options.maxRetries || 2
+        };
+
+        this.collectedProducts = new Map(); // ASIN -> 完整商品数据
+        this.failedUrls = [];
+        this.summary = [];
+        this.currentIndex = 0;
+        this.isRunning = false;
+        this.isPaused = false;
+    }
+
+    async start(progressCallback) {
+        this.isRunning = true;
+        this.isPaused = false;
+
+        for (let i = this.currentIndex; i < this.urls.length && this.isRunning; i++) {
+            if (this.isPaused) {
+                await this.waitForResume();
+            }
+
+            const url = this.urls[i];
+            this.currentIndex = i;
+
+            // 更新进度
+            progressCallback({
+                total: this.urls.length,
+                completed: i,
+                failed: this.failedUrls.length,
+                current: `正在采集: ${this.extractASIN(url)}`
+            });
+
+            // 采集单个商品
+            await this.collectSingleProduct(url);
+
+            // 延迟
+            if (i < this.urls.length - 1) {
+                await this.delay(this.options.interval * 1000);
+            }
+        }
+
+        // 最终进度更新
+        const successCount = this.collectedProducts.size;
+        progressCallback({
+            total: this.urls.length,
+            completed: successCount,
+            failed: this.failedUrls.length,
+            current: `采集完成 - 成功: ${successCount}, 失败: ${this.failedUrls.length}`
+        });
+
+        console.log('BatchCollector采集完成:', {
+            总链接数: this.urls.length,
+            成功采集: successCount,
+            失败数量: this.failedUrls.length,
+            采集数据: this.collectedProducts
+        });
+
+        this.isRunning = false;
+    }
+
+    async collectSingleProduct(url) {
+        let attempts = 0;
+        const maxAttempts = this.options.maxRetries + 1;
+
+        while (attempts < maxAttempts) {
+            try {
+                // 使用fetch方式采集商品数据
+                const productData = await this.fetchProductData(url);
+
+                if (productData && productData.asin) {
+                    const asin = productData.asin;
+
+                    // 保存完整数据
+                    this.collectedProducts.set(asin, productData);
+                    console.log(`数据已保存到collectedProducts，当前总数: ${this.collectedProducts.size}`);
+
+                    // 保存汇总信息
+                    this.summary.push({
+                        asin: asin,
+                        title: productData.title,
+                        brand: productData.brand,
+                        price: productData.currentPrice,
+                        rating: productData.rating,
+                        reviewCount: productData.reviewCount,
+                        url: productData.url,
+                        mainImage: productData.images?.[0],
+                        collectedAt: new Date().toISOString()
+                    });
+
+                    console.log(`商品 ${asin} 采集成功:`, productData.title);
+                    return; // 成功，退出重试循环
+                }
+
+            } catch (error) {
+                attempts++;
+                if (attempts >= maxAttempts) {
+                    this.failedUrls.push({
+                        url: url,
+                        error: error.message,
+                        attempts: attempts
+                    });
+                }
+            }
+        }
+    }
+
+    async fetchProductData(url) {
+
+        try {
+            // 使用fetch获取页面HTML
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': navigator.userAgent,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                },
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const html = await response.text();
+            console.log('页面HTML获取成功，长度:', html.length);
+
+            // 解析HTML
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+
+            // 使用详细的提取逻辑
+            const productData = await this.extractProductFromIframe(doc, url);
+
+            console.log('商品数据提取完成:', productData?.asin || '无ASIN');
+            return productData;
+
+        } catch (error) {
+            console.error('fetch采集失败:', error);
+            throw new Error(`采集失败: ${error.message}`);
+        }
+    }
+
+    // 从iframe中提取完整的商品数据（类似content.js的逻辑）
+    async extractProductFromIframe(doc, url) {
+        const asin = this.extractASIN(url);
+        console.log('提取到的ASIN:', asin);
+
+        // 基础信息提取
+        const title = this.getTextContent(doc, '#productTitle') ||
+                     this.getTextContent(doc, '.product-title') ||
+                     'Unknown Title';
+
+        const brand = this.getTextContent(doc, '#bylineInfo') ||
+                     this.getTextContent(doc, '.a-brand') ||
+                     this.getTextContent(doc, '[data-brand]') ||
+                     'Unknown Brand';
+
+        // 价格信息
+        const currentPrice = this.extractPrice(doc, [
+            '.a-price.a-text-price.a-size-medium.a-color-base .a-offscreen',
+            '.a-price-whole',
+            '.a-price .a-offscreen',
+            '#priceblock_dealprice',
+            '#priceblock_ourprice'
+        ]);
+
+        const originalPrice = this.extractPrice(doc, [
+            '.a-price.a-text-price .a-offscreen',
+            '.a-price-was .a-offscreen',
+            '#priceblock_listprice'
+        ]);
+
+        // 评分和评论
+        const rating = this.extractRating(doc);
+        const reviewCount = this.extractReviewCount(doc);
+
+        // 图片
+        const images = this.extractDetailedImages(doc);
+
+        // 商品描述
+        const description = this.extractDescription(doc);
+
+        // 商品特性
+        const features = this.extractFeatures(doc);
+
+        // 规格信息
+        const specifications = this.extractSpecifications(doc);
+
+        // 变体信息
+        const variants = this.extractVariants(doc);
+
+        // 库存状态
+        const availability = this.extractAvailability(doc);
+
+        // 分类信息
+        const category = this.extractCategory(doc);
+
+        return {
+            asin: asin,
+            title: title.trim(),
+            brand: brand.trim(),
+            currentPrice: currentPrice,
+            originalPrice: originalPrice,
+            rating: rating,
+            reviewCount: reviewCount,
+            url: url,
+            images: images,
+            description: description,
+            features: features,
+            specifications: specifications,
+            variants: variants,
+            availability: availability,
+            category: category,
+            extractedAt: new Date().toISOString(),
+            source: 'batch_collection'
+        };
+    }
+
+    extractProductFromDoc(doc, url) {
+        // 简化版本，用于备用方案
+        return this.extractProductFromIframe(doc, url);
+    }
+
+    getTextContent(doc, selector) {
+        const element = doc.querySelector(selector);
+        return element ? element.textContent : null;
+    }
+
+    parseRating(ratingText) {
+        const match = ratingText.match(/(\d+\.?\d*)/);
+        return match ? parseFloat(match[1]) : 0;
+    }
+
+    parseReviewCount(reviewText) {
+        const match = reviewText.match(/(\d+)/);
+        return match ? parseInt(match[1]) : 0;
+    }
+
+    // 提取价格
+    extractPrice(doc, selectors) {
+        for (const selector of selectors) {
+            const element = doc.querySelector(selector);
+            if (element) {
+                const text = element.textContent.trim();
+                const priceMatch = text.match(/[\d,]+\.?\d*/);
+                if (priceMatch) {
+                    return text;
+                }
+            }
+        }
+        return 'Price not available';
+    }
+
+    // 提取评分
+    extractRating(doc) {
+        const selectors = [
+            '.a-icon-alt',
+            '[data-hook="rating-out-of-text"]',
+            '.a-star-medium .a-icon-alt'
+        ];
+
+        for (const selector of selectors) {
+            const element = doc.querySelector(selector);
+            if (element) {
+                const text = element.textContent || element.getAttribute('title') || '';
+                const match = text.match(/(\d+\.?\d*)/);
+                if (match) {
+                    return parseFloat(match[1]);
+                }
+            }
+        }
+        return 0;
+    }
+
+    // 提取评论数
+    extractReviewCount(doc) {
+        const selectors = [
+            '#acrCustomerReviewText',
+            '[data-hook="total-review-count"]',
+            '.a-link-normal[href*="reviews"]'
+        ];
+
+        for (const selector of selectors) {
+            const element = doc.querySelector(selector);
+            if (element) {
+                const text = element.textContent.trim();
+                const match = text.match(/(\d+)/);
+                if (match) {
+                    return parseInt(match[1]);
+                }
+            }
+        }
+        return 0;
+    }
+
+    // 提取详细图片
+    extractDetailedImages(doc) {
+        const images = [];
+        const selectors = [
+            '#landingImage',
+            '.a-dynamic-image',
+            '#imgTagWrapperId img',
+            '.a-button-thumbnail img'
+        ];
+
+        selectors.forEach(selector => {
+            const imgElements = doc.querySelectorAll(selector);
+            imgElements.forEach(img => {
+                const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-old-hires');
+                if (src && !images.includes(src)) {
+                    images.push(src);
+                }
+            });
+        });
+
+        return images;
+    }
+
+    // 提取商品描述
+    extractDescription(doc) {
+        const selectors = [
+            '#feature-bullets ul',
+            '#productDescription',
+            '.a-unordered-list.a-vertical.a-spacing-mini'
+        ];
+
+        for (const selector of selectors) {
+            const element = doc.querySelector(selector);
+            if (element) {
+                return element.textContent.trim();
+            }
+        }
+        return '';
+    }
+
+    // 提取商品特性
+    extractFeatures(doc) {
+        const features = [];
+        const featureElements = doc.querySelectorAll('#feature-bullets li, .a-unordered-list li');
+
+        featureElements.forEach(li => {
+            const text = li.textContent.trim();
+            if (text && text.length > 10) {
+                features.push(text);
+            }
+        });
+
+        return features;
+    }
+
+    // 提取规格信息
+    extractSpecifications(doc) {
+        const specs = {};
+        const specElements = doc.querySelectorAll('#productDetails_techSpec_section_1 tr, .a-keyvalue tr');
+
+        specElements.forEach(tr => {
+            const key = tr.querySelector('td:first-child, th');
+            const value = tr.querySelector('td:last-child');
+
+            if (key && value) {
+                const keyText = key.textContent.trim();
+                const valueText = value.textContent.trim();
+                if (keyText && valueText) {
+                    specs[keyText] = valueText;
+                }
+            }
+        });
+
+        return specs;
+    }
+
+    // 提取变体信息
+    extractVariants(doc) {
+        const variants = {};
+
+        // 尺寸变体
+        const sizeElements = doc.querySelectorAll('#variation_size_name .selection');
+        if (sizeElements.length > 0) {
+            variants.sizes = Array.from(sizeElements).map(el => el.textContent.trim());
+        }
+
+        // 颜色变体
+        const colorElements = doc.querySelectorAll('#variation_color_name .selection');
+        if (colorElements.length > 0) {
+            variants.colors = Array.from(colorElements).map(el => el.textContent.trim());
+        }
+
+        return variants;
+    }
+
+    // 提取库存状态
+    extractAvailability(doc) {
+        const selectors = [
+            '#availability span',
+            '.a-color-success',
+            '.a-color-state'
+        ];
+
+        for (const selector of selectors) {
+            const element = doc.querySelector(selector);
+            if (element) {
+                return element.textContent.trim();
+            }
+        }
+        return 'Unknown';
+    }
+
+    // 提取分类信息
+    extractCategory(doc) {
+        const breadcrumbs = [];
+        const breadcrumbElements = doc.querySelectorAll('#wayfinding-breadcrumbs_feature_div a');
+
+        breadcrumbElements.forEach(a => {
+            const text = a.textContent.trim();
+            if (text) {
+                breadcrumbs.push(text);
+            }
+        });
+
+        return breadcrumbs.join(' > ');
+    }
+
+    extractImages(doc) {
+        return this.extractDetailedImages(doc);
+    }
+
+    extractASIN(url) {
+        const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/i);
+        return asinMatch ? asinMatch[1].toUpperCase() : `UNKNOWN_${Date.now()}`;
+    }
+
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async waitForResume() {
+        while (this.isPaused && this.isRunning) {
+            await this.delay(100);
+        }
+    }
+
+    pause() {
+        this.isPaused = true;
+    }
+
+    resume() {
+        this.isPaused = false;
+    }
+
+    stop() {
+        this.isRunning = false;
+        this.isPaused = false;
+    }
+
+
+    // 逐个下载商品文件（传统方式，每个文件单独确认）
+    async downloadBatchDataAsTraditionalFiles() {
+        try {
+            if (!this.batchCollector || this.batchCollector.collectedProducts.size === 0) {
+                this.showMessage('没有可下载的数据', 'warning');
+                return;
+            }
+
+            this.showMessage('开始逐个下载商品文件...', 'info');
+
+
+            let downloadCount = 0;
+            const totalFiles = this.batchCollector.collectedProducts.size;
+
+            // 逐个下载每个商品的详细数据
+            for (const [asin, productData] of this.batchCollector.collectedProducts) {
+                try {
+                    // 清理商品数据，移除不需要的字段
+                    const cleanedData = this.cleanProductDataForExport(productData);
+
+                    this.downloadFile(
+                        `${asin}.json`,
+                        JSON.stringify(cleanedData, null, 2),
+                        'application/json'
+                    );
+
+                    downloadCount++;
+
+                    // 更新进度
+                    this.showMessage(`下载进度: ${downloadCount}/${totalFiles} - ${asin}.json`, 'info');
+
+                    // 添加延迟，避免浏览器阻止多文件下载
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                } catch (error) {
+                    console.error(`下载商品 ${asin} 失败:`, error);
+                }
+            }
+
+            // 下载失败链接文件（如果有）
+            if (this.batchCollector.failedUrls.length > 0) {
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
+                const failedContent = this.batchCollector.failedUrls
+                    .map(item => `${item.url} - ${item.error} (尝试${item.attempts}次)`)
+                    .join('\n');
+
+                this.downloadFile(
+                    `failed_links_${timestamp}.txt`,
+                    failedContent,
+                    'text/plain'
+                );
+            }
+
+            this.showMessage(`成功下载 ${downloadCount} 个商品文件`, 'success');
+
+        } catch (error) {
+            console.error('逐个下载失败:', error);
+            this.showMessage('逐个下载失败: ' + error.message, 'error');
         }
     }
 }

@@ -1,5 +1,23 @@
-// ZonGrabber Content Script
+// ZonGrabber Content Script v1.6.0
 // 负责从亚马逊页面提取商品数据
+
+// 全局错误处理 - 忽略亚马逊广告系统的沙盒错误
+window.addEventListener('error', function(event) {
+    if (event.message && event.message.includes('sandboxed') && event.message.includes('amazon-adsystem')) {
+        console.log('ZonGrabber: 忽略亚马逊广告系统沙盒错误');
+        event.preventDefault();
+        return false;
+    }
+}, true);
+
+// 忽略未捕获的Promise错误（通常来自亚马逊的脚本）
+window.addEventListener('unhandledrejection', function(event) {
+    if (event.reason && event.reason.toString().includes('amazon-adsystem')) {
+        console.log('ZonGrabber: 忽略亚马逊广告系统Promise错误');
+        event.preventDefault();
+        return false;
+    }
+});
 
 // 配置化的选择器，支持多种页面结构
 const SELECTORS = {
@@ -978,12 +996,10 @@ function extractAffiliateInfo() {
     // 检查SiteStripe是否可用
     const siteStripeWrap = document.querySelector('.amzn-ss-wrap');
     if (!siteStripeWrap) {
-      console.log('SiteStripe不可用');
       return affiliateInfo;
     }
 
     affiliateInfo.siteStripeAvailable = true;
-    console.log('SiteStripe可用');
 
     // 提取分类信息
     const categoryElement = document.querySelector('#amzn-ss-category-content');
@@ -1105,63 +1121,135 @@ const LIST_SELECTORS = {
   ]
 };
 
-// 主要的列表商品提取函数
+// 主要的列表商品提取函数 - 支持多页采集
 async function extractListProducts(filters = {}) {
   return new Promise(async (resolve, reject) => {
     const timeout = setTimeout(() => {
       console.error('列表商品提取超时');
       reject(new Error('列表商品提取超时，请刷新页面后重试'));
-    }, 60000); // 60秒超时
+    }, 180000); // 3分钟超时（减少超时时间）
 
     try {
       console.log('开始列表商品提取...', filters);
+
+      // 添加随机延迟，模拟人类行为
+      const randomDelay = Math.random() * 1000 + 500; // 500-1500ms随机延迟
+
+      await new Promise(resolve => setTimeout(resolve, randomDelay));
 
       // 检查是否为列表页面
       if (!isListPage()) {
         throw new Error('当前页面不是亚马逊列表页面');
       }
 
-      // 等待页面完全加载
-      await waitForPageLoad();
-      console.log('页面加载完成，开始提取列表商品...');
+      const maxPages = filters.maxPages || 1;
+      const pageDelay = (filters.pageDelay || 3) * 1000; // 转换为毫秒
 
-      const products = [];
-      const productElements = getProductElements();
+      console.log(`准备采集 ${maxPages} 页商品，页面延迟 ${pageDelay/1000} 秒`);
 
-      console.log(`找到 ${productElements.length} 个商品元素`);
-
-      // 提取每个商品的数据
-      for (let i = 0; i < productElements.length; i++) {
-        const element = productElements[i];
-        try {
-          const product = await extractProductFromListItem(element, i);
-          if (product && product.asin) {
-            // 应用过滤条件
-            if (passesFilters(product, filters)) {
-              products.push(product);
-              console.log(`商品 ${i + 1} 提取成功并通过过滤:`, product.title);
-            } else {
-              console.log(`商品 ${i + 1} 被过滤:`, product.title);
-            }
-          }
-        } catch (error) {
-          console.warn(`提取商品 ${i + 1} 失败:`, error);
+      // 检查是否支持多页采集
+      if (maxPages > 1) {
+        const hasNext = hasNextPage();
+        if (!hasNext && maxPages > 1) {
+          console.log('当前页面没有下一页，将只采集当前页');
         }
       }
 
-      // 排序商品
-      const sortedProducts = sortProducts(products, filters.sortBy || 'sales');
+      // 如果只采集1页，使用原来的逻辑
+      if (maxPages === 1) {
+        console.log('🔄 单页采集模式');
+        return await extractCurrentPageProducts(filters, 1);
+      }
+
+      let allProducts = [];
+      let currentPage = 1;
+      let totalFound = 0;
+      let currentDoc = document; // 当前页面的文档对象
+
+      // 多页采集循环
+      while (currentPage <= maxPages) {
+
+        // 等待页面完全加载
+        await waitForPageLoad();
+
+        // 提取当前页商品
+        const pageResult = await extractCurrentPageProducts(filters, currentPage);
+
+        allProducts = allProducts.concat(pageResult.products);
+        totalFound += pageResult.totalFound;
+
+        // 检查是否还有下一页且未达到最大页数
+        if (currentPage < maxPages && hasNextPage(currentDoc)) {
+          // 页面延迟
+          await new Promise(resolve => setTimeout(resolve, pageDelay));
+
+          // 获取下一页URL
+          const nextPageUrl = getNextPageUrl(currentDoc);
+          if (!nextPageUrl) {
+            break;
+          }
+
+          try {
+            // 使用fetch获取下一页HTML
+            const nextPageHTML = await fetchNextPageHTML(nextPageUrl);
+
+            // 解析下一页的商品元素和更新文档上下文
+            const parser = new DOMParser();
+            const nextPageDoc = parser.parseFromString(nextPageHTML, 'text/html');
+            currentDoc = nextPageDoc; // 更新当前文档上下文
+
+            const nextPageElements = parseProductsFromHTML(nextPageHTML, currentPage + 1);
+
+            // 提取下一页商品数据
+            const nextPageProducts = [];
+            for (let i = 0; i < nextPageElements.length; i++) {
+              const element = nextPageElements[i];
+              try {
+                const product = await extractProductFromListItem(element, i);
+                if (product && product.asin) {
+                  // 添加页面信息
+                  product.pageNumber = currentPage + 1;
+                  product.positionInPage = i + 1;
+
+                  // 应用过滤条件
+                  if (passesFilters(product, filters)) {
+                    nextPageProducts.push(product);
+                  }
+                }
+              } catch (error) {
+                console.warn(`第${currentPage + 1}页商品 ${i + 1} 提取失败:`, error);
+              }
+            }
+
+            // 合并结果
+            allProducts = allProducts.concat(nextPageProducts);
+            totalFound += nextPageElements.length;
+
+            currentPage++;
+          } catch (error) {
+            console.error(`第 ${currentPage + 1} 页采集失败:`, error);
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+
+      // 排序所有商品
+      const sortedProducts = sortProducts(allProducts, filters.sortBy || 'sales');
 
       const result = {
         products: sortedProducts,
-        totalFound: productElements.length,
+        totalFound: totalFound,
         totalFiltered: sortedProducts.length,
+        pagesCollected: currentPage,
+        maxPages: maxPages,
         filters: filters,
         extractedAt: new Date().toISOString(),
         pageType: 'list'
       };
 
-      console.log('列表商品提取完成:', result);
+      console.log('多页列表商品提取完成');
       clearTimeout(timeout);
       resolve(result);
     } catch (error) {
@@ -1170,6 +1258,70 @@ async function extractListProducts(filters = {}) {
       reject(error);
     }
   });
+}
+
+// 提取当前页面的商品
+async function extractCurrentPageProducts(filters, pageNumber) {
+  const products = [];
+  const productElements = await getProductElements();
+
+  // 分批处理商品，避免一次性处理太多
+  const batchSize = 5; // 每批处理5个商品
+  const totalBatches = Math.ceil(productElements.length / batchSize);
+
+  console.log(`第${pageNumber}页共${productElements.length}个商品，分${totalBatches}批处理`);
+
+  for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+    const startIndex = batchIndex * batchSize;
+    const endIndex = Math.min(startIndex + batchSize, productElements.length);
+
+    console.log(`处理第${batchIndex + 1}/${totalBatches}批商品 (${startIndex + 1}-${endIndex})`);
+
+    // 处理当前批次的商品
+    for (let i = startIndex; i < endIndex; i++) {
+      const element = productElements[i];
+      try {
+        const product = await extractProductFromListItem(element, i);
+        if (product && product.asin) {
+          // 添加页面信息
+          product.pageNumber = pageNumber;
+          product.positionInPage = i + 1;
+
+          // 应用过滤条件
+          if (passesFilters(product, filters)) {
+            products.push(product);
+          }
+        }
+
+        // 每个商品之间添加小延迟
+        if (i < endIndex - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+        }
+
+      } catch (error) {
+        console.warn(`第${pageNumber}页商品 ${i + 1} 提取失败:`, error);
+
+        // 如果是沙盒错误，继续处理下一个商品
+        if (error.message && error.message.includes('sandboxed')) {
+          console.log(`忽略商品 ${i + 1} 的沙盒错误，继续处理`);
+          continue;
+        }
+      }
+    }
+
+    // 每批之间添加较长延迟，模拟人类浏览行为
+    if (batchIndex < totalBatches - 1) {
+      const batchDelay = 1000 + Math.random() * 1000; // 1-2秒随机延迟
+
+      await new Promise(resolve => setTimeout(resolve, batchDelay));
+    }
+  }
+
+  return {
+    products: products,
+    totalFound: productElements.length,
+    pageNumber: pageNumber
+  };
 }
 
 // 检查是否为列表页面
@@ -1183,23 +1335,50 @@ function isListPage() {
 }
 
 // 获取页面中的商品元素
-function getProductElements() {
+async function getProductElements() {
   let elements = [];
 
-  // 尝试不同的选择器
-  for (const selector of LIST_SELECTORS.productContainers) {
-    elements = document.querySelectorAll(selector);
-    if (elements.length > 0) {
-      console.log(`使用选择器 "${selector}" 找到 ${elements.length} 个商品`);
-      break;
-    }
-  }
+  console.log('开始查找商品元素...');
 
-  // 过滤掉无效的元素
-  return Array.from(elements).filter(element => {
-    // 确保元素可见且包含基本信息
-    return element.offsetHeight > 0 &&
-           (element.querySelector('h2') || element.querySelector('.a-size-base-plus'));
+  // 等待页面稳定
+  const waitForStable = () => {
+    return new Promise(resolve => {
+      let checkCount = 0;
+      const checkInterval = setInterval(() => {
+        const currentElements = document.querySelectorAll('[data-component-type="s-search-result"]');
+        checkCount++;
+
+        if (currentElements.length > 0 || checkCount > 10) {
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 500);
+    });
+  };
+
+  // 等待页面稳定后再获取元素
+  return waitForStable().then(() => {
+    // 尝试不同的选择器
+    for (const selector of LIST_SELECTORS.productContainers) {
+      elements = document.querySelectorAll(selector);
+      if (elements.length > 0) {
+        console.log(`使用选择器 "${selector}" 找到 ${elements.length} 个商品`);
+        break;
+      }
+    }
+
+    // 过滤掉无效的元素，但减少DOM操作
+    const validElements = Array.from(elements).filter((element, index) => {
+      // 只检查前50个元素，避免过多DOM操作
+      if (index >= 50) return false;
+
+      // 简化可见性检查
+      return element.offsetHeight > 0 &&
+             (element.querySelector('h2, h3, .a-size-base-plus, .a-size-medium') !== null);
+    });
+
+    console.log(`过滤后得到 ${validElements.length} 个有效商品元素`);
+    return validElements;
   });
 }
 
@@ -1207,6 +1386,13 @@ function getProductElements() {
 async function extractProductFromListItem(element, index) {
   try {
     console.log(`开始提取商品 ${index + 1}...`);
+
+    // 模拟人类行为：随机查看元素
+    if (Math.random() < 0.3) { // 30%概率模拟鼠标悬停
+      element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
+      element.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    }
 
     const product = {
       asin: extractASINFromListElement(element),
@@ -1236,6 +1422,20 @@ async function extractProductFromListItem(element, index) {
     return product;
   } catch (error) {
     console.error(`提取商品 ${index + 1} 失败:`, error);
+
+    // 如果是沙盒错误，忽略并继续
+    if (error.message && error.message.includes('sandboxed')) {
+      console.log(`商品 ${index + 1}: 忽略沙盒错误，继续处理`);
+      return null;
+    }
+
+    // 如果是网络错误，等待后重试
+    if (error.message && (error.message.includes('network') || error.message.includes('fetch'))) {
+      console.log(`商品 ${index + 1}: 网络错误，等待1秒后继续`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return null;
+    }
+
     return null;
   }
 }
@@ -1521,3 +1721,129 @@ function sortProducts(products, sortBy = 'sales') {
     }
   });
 }
+
+// ==================== 分页相关函数 ====================
+
+// 检查是否有下一页
+function hasNextPage(doc = document) {
+  // 查找包含s-pagination-next类的A标签
+  const nextLink = doc.querySelector('a.s-pagination-next[href*="page="]');
+  return nextLink !== null;
+}
+
+// 获取下一页URL
+function getNextPageUrl(doc = document) {
+  // 查找包含s-pagination-next类的A标签
+  const nextLink = doc.querySelector('a.s-pagination-next[href*="page="]');
+
+  if (nextLink) {
+    const href = nextLink.getAttribute('href');
+    if (href) {
+      // 如果是相对链接，转换为绝对链接
+      return href.startsWith('/') ? window.location.origin + href : href;
+    }
+  }
+
+  return null;
+}
+
+// 获取下一页的HTML内容
+async function fetchNextPageHTML(nextPageUrl) {
+  try {
+    const response = await fetch(nextPageUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': navigator.userAgent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+      },
+      credentials: 'include' // 包含cookies
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const html = await response.text();
+    return html;
+  } catch (error) {
+    console.error('获取下一页HTML失败:', error);
+    throw error;
+  }
+}
+
+// 从HTML字符串中解析商品数据
+function parseProductsFromHTML(html, pageNumber) {
+  try {
+    // 创建临时DOM解析器
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // 使用相同的选择器获取商品元素
+    const productElements = getProductElementsFromDoc(doc);
+
+    return productElements;
+  } catch (error) {
+    console.error(`解析第${pageNumber}页HTML失败:`, error);
+    return [];
+  }
+}
+
+// 从文档中获取商品元素（类似getProductElements但用于解析的文档）
+function getProductElementsFromDoc(doc) {
+  let elements = [];
+
+  // 尝试不同的选择器
+  for (const selector of LIST_SELECTORS.productContainers) {
+    elements = doc.querySelectorAll(selector);
+    if (elements.length > 0) {
+      break;
+    }
+  }
+
+  // 过滤掉无效的元素
+  return Array.from(elements).filter(element => {
+    // 确保元素包含基本信息
+    return element.querySelector('h2') || element.querySelector('.a-size-base-plus');
+  });
+}
+
+// 获取当前页码
+function getCurrentPageNumber() {
+  const currentPageElement = document.querySelector('.s-pagination-selected');
+  if (currentPageElement) {
+    const pageText = currentPageElement.textContent.trim();
+    const pageNumber = parseInt(pageText);
+    return isNaN(pageNumber) ? 1 : pageNumber;
+  }
+  return 1;
+}
+
+// 获取总页数（如果可见）
+function getTotalPages() {
+  const pageLinks = document.querySelectorAll('.s-pagination-button');
+  let maxPage = 1;
+
+  pageLinks.forEach(link => {
+    const pageText = link.textContent.trim();
+    const pageNumber = parseInt(pageText);
+    if (!isNaN(pageNumber) && pageNumber > maxPage) {
+      maxPage = pageNumber;
+    }
+  });
+
+  // 检查是否有省略号，表示还有更多页面
+  const hasEllipsis = document.querySelector('.s-pagination-ellipsis') !== null;
+  if (hasEllipsis) {
+    // 如果有省略号，实际页数可能更多
+    return maxPage + '+';
+  }
+
+  return maxPage;
+}
+
+
