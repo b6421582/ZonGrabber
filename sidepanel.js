@@ -3,7 +3,15 @@
 class ZonGrabberPanel {
     constructor() {
         this.currentProductData = null;
+        this.currentPageType = 'unknown';
+        this.pageCheckInterval = null;
+        console.log('ZonGrabber: 面板初始化');
         this.init();
+
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', () => {
+            this.cleanup();
+        });
     }
 
     init() {
@@ -11,13 +19,15 @@ class ZonGrabberPanel {
         this.loadAffiliateTag(); // 加载保存的联盟标识
         this.loadMinEarnings(); // 加载保存的最低销售佣金设置
         this.loadMinRating(); // 加载保存的最低评分设置
+        this.loadListSettings(); // 加载列表采集设置
+        this.setupPageChangeListener(); // 设置页面变化监听
         this.checkPageStatus();
     }
 
     bindEvents() {
-        // 采集按钮
+        // 采集按钮 - 根据页面类型调用不同功能
         document.getElementById('extractBtn').addEventListener('click', () => {
-            this.extractProductData();
+            this.handleExtractClick();
         });
 
         // 刷新按钮
@@ -50,11 +60,35 @@ class ZonGrabberPanel {
             this.saveMinRating();
         });
 
+        // 列表设置相关按钮
+        document.getElementById('saveMinSalesBtn').addEventListener('click', () => {
+            this.saveMinSales();
+        });
 
+        document.getElementById('saveMinListRatingBtn').addEventListener('click', () => {
+            this.saveMinListRating();
+        });
 
-        // 导出按钮
-        document.getElementById('exportJsonBtn').addEventListener('click', () => {
-            this.exportData('json');
+        document.getElementById('saveMinReviewsBtn').addEventListener('click', () => {
+            this.saveMinReviews();
+        });
+
+        document.getElementById('saveBrandFilterBtn').addEventListener('click', () => {
+            this.saveBrandFilter();
+        });
+
+        document.getElementById('saveSortByBtn').addEventListener('click', () => {
+            this.saveSortBy();
+        });
+
+        // 列表设置折叠功能
+        document.getElementById('listCollapseBtn').addEventListener('click', () => {
+            this.toggleListSettings();
+        });
+
+        // 导出按钮 - 根据页面类型调用不同功能
+        document.getElementById('exportBtn').addEventListener('click', () => {
+            this.handleExportClick();
         });
 
 
@@ -73,20 +107,93 @@ class ZonGrabberPanel {
         try {
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             const currentTab = tabs[0];
-            
-            if (this.isAmazonProductPage(currentTab.url)) {
-                this.updateStatus('ready', '准备采集');
-            } else {
-                this.updateStatus('error', '请打开亚马逊商品页面');
-            }
+
+            console.log('ZonGrabber: 开始检查页面状态，URL =', currentTab.url);
+
+            const pageType = this.getPageType(currentTab.url);
+            this.handlePageTypeChanged(pageType, currentTab.url);
         } catch (error) {
-            console.error('检查页面状态失败:', error);
+            console.error('ZonGrabber: 检查页面状态失败:', error);
             this.updateStatus('error', '无法检查页面状态');
         }
     }
 
     isAmazonProductPage(url) {
         return url && url.includes('amazon.') && url.includes('/dp/');
+    }
+
+    // 获取页面类型
+    getPageType(url) {
+        console.log('ZonGrabber: 检测页面URL =', url);
+
+        if (!url || !url.includes('amazon.')) {
+            console.log('ZonGrabber: 非亚马逊页面');
+            return 'unknown';
+        }
+
+        if (url.includes('/dp/') || url.includes('/gp/product/')) {
+            console.log('ZonGrabber: 检测到商品详情页');
+            return 'product';
+        }
+        if (url.includes('/s?') || url.includes('/gp/search/')) {
+            console.log('ZonGrabber: 检测到搜索结果页');
+            return 'search';
+        }
+        if (url.includes('/b/')) {
+            console.log('ZonGrabber: 检测到分类页面');
+            return 'category';
+        }
+        if (url.includes('/stores/')) {
+            console.log('ZonGrabber: 检测到品牌店铺页');
+            return 'store';
+        }
+
+        console.log('ZonGrabber: 未知的亚马逊页面类型');
+        return 'unknown';
+    }
+
+    // 根据页面类型更新UI
+    updateUIForPageType(pageType) {
+        console.log('ZonGrabber: 更新UI，页面类型 =', pageType);
+
+        // 存储当前页面类型
+        this.currentPageType = pageType;
+
+        const extractBtn = document.getElementById('extractBtn');
+        const extractBtnIcon = document.getElementById('extractBtnIcon');
+        const extractBtnText = document.getElementById('extractBtnText');
+        const exportBtn = document.getElementById('exportBtn');
+        const exportBtnIcon = document.getElementById('exportBtnIcon');
+        const exportBtnText = document.getElementById('exportBtnText');
+        const listSettings = document.getElementById('listSettingsSection');
+
+        if (pageType === 'product') {
+            // 商品详情页：显示单品采集功能
+            console.log('ZonGrabber: 🔄 切换到商品详情页模式');
+            extractBtn.style.display = 'block';
+            extractBtnIcon.textContent = '📊';
+            extractBtnText.textContent = '采集单品';
+            exportBtn.style.display = 'block';
+            exportBtnIcon.textContent = '📥';
+            exportBtnText.textContent = '导出单品';
+            listSettings.style.display = 'none';
+        } else if (['search', 'category', 'store'].includes(pageType)) {
+            // 列表页：显示列表采集功能
+            console.log('ZonGrabber: 🔄 切换到列表页模式');
+            extractBtn.style.display = 'block';
+            extractBtnIcon.textContent = '📋';
+            extractBtnText.textContent = '采集列表';
+            exportBtn.style.display = 'block';
+            exportBtnIcon.textContent = '📋';
+            exportBtnText.textContent = '导出列表';
+            listSettings.style.display = 'block';
+        } else {
+            // 其他页面：隐藏功能
+            console.log('ZonGrabber: ❌ 非亚马逊页面，隐藏功能');
+            extractBtn.style.display = 'none';
+            exportBtn.style.display = 'none';
+            listSettings.style.display = 'none';
+        }
     }
 
     updateStatus(type, message) {
@@ -96,6 +203,36 @@ class ZonGrabberPanel {
         
         dot.className = `status-dot ${type}`;
         text.textContent = message;
+    }
+
+    // 处理采集按钮点击
+    handleExtractClick() {
+        console.log('ZonGrabber: 采集按钮被点击，当前页面类型 =', this.currentPageType);
+
+        if (this.currentPageType === 'product') {
+            console.log('ZonGrabber: 执行单品采集');
+            this.extractProductData();
+        } else if (['search', 'category', 'store'].includes(this.currentPageType)) {
+            console.log('ZonGrabber: 执行列表采集');
+            this.extractListProducts();
+        } else {
+            this.showMessage('请在亚马逊页面使用此功能', 'error');
+        }
+    }
+
+    // 处理导出按钮点击
+    handleExportClick() {
+        console.log('ZonGrabber: 导出按钮被点击，当前页面类型 =', this.currentPageType);
+
+        if (this.currentPageType === 'product') {
+            console.log('ZonGrabber: 执行单品导出');
+            this.exportData('json');
+        } else if (['search', 'category', 'store'].includes(this.currentPageType)) {
+            console.log('ZonGrabber: 执行列表导出');
+            this.exportListData();
+        } else {
+            this.showMessage('没有可导出的数据', 'warning');
+        }
     }
 
     async extractProductData() {
@@ -111,8 +248,9 @@ class ZonGrabberPanel {
                 throw new Error('无法获取当前标签页');
             }
 
-            if (!this.isAmazonProductPage(currentTab.url)) {
-                throw new Error('请在亚马逊商品页面使用此功能');
+            const pageType = this.getPageType(currentTab.url);
+            if (pageType !== 'product') {
+                throw new Error('请在亚马逊商品详情页面使用此功能');
             }
 
             // 首先检查content script是否已加载
@@ -160,6 +298,80 @@ class ZonGrabberPanel {
             let errorMessage = error.message;
             if (error.message.includes('超时')) {
                 errorMessage += '\n\n建议：\n1. 刷新页面后重试\n2. 确保页面完全加载\n3. 检查网络连接';
+            }
+
+            this.showMessage(errorMessage, 'error');
+        } finally {
+            this.showLoading(false);
+        }
+    }
+
+    // 列表商品采集函数
+    async extractListProducts() {
+        try {
+            this.showLoading(true);
+            this.updateStatus('active', '正在采集列表商品...');
+
+            // 获取当前活动标签页
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const currentTab = tabs[0];
+
+            if (!currentTab) {
+                throw new Error('无法获取当前标签页');
+            }
+
+            const pageType = this.getPageType(currentTab.url);
+            if (!['search', 'category', 'store'].includes(pageType)) {
+                throw new Error('请在亚马逊列表页面使用此功能');
+            }
+
+            // 获取过滤条件
+            const filters = await this.getListFilters();
+            console.log('使用过滤条件:', filters);
+
+            // 首先检查content script是否已加载
+            try {
+                await chrome.tabs.sendMessage(currentTab.id, { action: 'ping' });
+            } catch (error) {
+                console.log('重新注入content script...');
+                await chrome.scripting.executeScript({
+                    target: { tabId: currentTab.id },
+                    files: ['content.js']
+                });
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+            // 设置超时保护
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error('列表商品采集超时，请刷新页面后重试'));
+                }, 60000); // 60秒超时
+            });
+
+            // 发送消息给background script请求列表数据
+            const dataPromise = chrome.runtime.sendMessage({
+                action: 'getListProducts',
+                filters: filters
+            });
+
+            // 使用Promise.race来实现超时
+            const response = await Promise.race([dataPromise, timeoutPromise]);
+
+            if (response && response.success) {
+                this.currentProductData = response.data;
+                this.displayListProductsData(response.data);
+                this.updateStatus('ready', '列表采集完成');
+                this.showMessage(`成功采集 ${response.data.totalFiltered} 个商品！`, 'success');
+            } else {
+                throw new Error(response?.error || '列表商品采集失败');
+            }
+        } catch (error) {
+            console.error('采集列表商品失败:', error);
+            this.updateStatus('error', '列表采集失败');
+
+            let errorMessage = error.message;
+            if (error.message.includes('超时')) {
+                errorMessage += '\n\n建议：\n1. 刷新页面后重试\n2. 确保页面完全加载\n3. 减少过滤条件';
             }
 
             this.showMessage(errorMessage, 'error');
@@ -1142,6 +1354,324 @@ class ZonGrabberPanel {
 
         console.log('清理后的导出数据:', cleanData);
         return cleanData;
+    }
+
+    // ==================== 列表采集相关函数 ====================
+
+    // 获取列表过滤条件
+    async getListFilters() {
+        return {
+            minSales: parseInt(document.getElementById('minSales').value) || 0,
+            minRating: parseFloat(document.getElementById('minListRating').value) || 0,
+            minReviews: parseInt(document.getElementById('minReviews').value) || 0,
+            brandFilter: document.getElementById('brandFilter').value.trim(),
+            sortBy: document.getElementById('sortBy').value || 'sales'
+        };
+    }
+
+    // 显示列表商品数据
+    displayListProductsData(data) {
+        console.log('显示列表商品数据:', data);
+
+        // 隐藏单品预览，显示列表结果
+        document.getElementById('productPreview').style.display = 'none';
+
+        // 更新数据详情区域
+        const dataDetails = document.getElementById('dataDetails');
+        dataDetails.style.display = 'block';
+
+        // 切换到原始数据标签页显示列表结果
+        this.switchTab('raw');
+
+        // 在原始数据区域显示格式化的列表结果
+        const rawDataText = document.getElementById('rawDataText');
+        rawDataText.value = JSON.stringify(data, null, 2);
+
+        // 在基础信息标签页显示汇总信息
+        this.displayListSummary(data);
+    }
+
+    // 显示列表汇总信息
+    displayListSummary(data) {
+        // 更新基础信息标签页显示汇总
+        document.getElementById('detailASIN').textContent = `共 ${data.totalFiltered} 个商品`;
+        document.getElementById('detailBrand').textContent = data.filters.brandFilter || '无品牌筛选';
+        document.getElementById('detailCurrentPrice').textContent = `最低销量: ${data.filters.minSales}`;
+        document.getElementById('detailOriginalPrice').textContent = `最低评分: ${data.filters.minRating}`;
+        document.getElementById('detailRating').textContent = `最低评论数: ${data.filters.minReviews}`;
+        document.getElementById('detailReviewCount').textContent = `排序方式: ${this.getSortByText(data.filters.sortBy)}`;
+        document.getElementById('detailStockStatus').textContent = `总找到: ${data.totalFound} 个`;
+        document.getElementById('detailCategory').textContent = `采集时间: ${new Date(data.extractedAt).toLocaleString()}`;
+    }
+
+    // 获取排序方式文本
+    getSortByText(sortBy) {
+        const sortTexts = {
+            'sales': '按销量排序',
+            'rating': '按评分排序',
+            'price': '按价格排序(低到高)',
+            'priceDesc': '按价格排序(高到低)'
+        };
+        return sortTexts[sortBy] || sortBy;
+    }
+
+    // 加载列表设置
+    loadListSettings() {
+        chrome.storage.local.get([
+            'minSales', 'minListRating', 'minReviews',
+            'brandFilter', 'sortBy'
+        ], (result) => {
+            if (result.minSales !== undefined) {
+                document.getElementById('minSales').value = result.minSales;
+            }
+            if (result.minListRating !== undefined) {
+                document.getElementById('minListRating').value = result.minListRating;
+            }
+            if (result.minReviews !== undefined) {
+                document.getElementById('minReviews').value = result.minReviews;
+            }
+            if (result.brandFilter !== undefined) {
+                document.getElementById('brandFilter').value = result.brandFilter;
+            }
+            if (result.sortBy !== undefined) {
+                document.getElementById('sortBy').value = result.sortBy;
+            }
+        });
+    }
+
+    // 保存最低销量设置
+    saveMinSales() {
+        const minSales = document.getElementById('minSales').value;
+        chrome.storage.local.set({ minSales: parseInt(minSales) || 0 }, () => {
+            this.showMessage('最低销量设置已保存', 'success');
+        });
+    }
+
+    // 保存最低评分设置（列表用）
+    saveMinListRating() {
+        const minListRating = document.getElementById('minListRating').value;
+        chrome.storage.local.set({ minListRating: parseFloat(minListRating) || 0 }, () => {
+            this.showMessage('最低评分设置已保存', 'success');
+        });
+    }
+
+    // 保存最低评论数设置
+    saveMinReviews() {
+        const minReviews = document.getElementById('minReviews').value;
+        chrome.storage.local.set({ minReviews: parseInt(minReviews) || 0 }, () => {
+            this.showMessage('最低评论数设置已保存', 'success');
+        });
+    }
+
+    // 保存品牌筛选设置
+    saveBrandFilter() {
+        const brandFilter = document.getElementById('brandFilter').value.trim();
+        chrome.storage.local.set({ brandFilter: brandFilter }, () => {
+            this.showMessage('品牌筛选设置已保存', 'success');
+        });
+    }
+
+    // 保存排序方式设置
+    saveSortBy() {
+        const sortBy = document.getElementById('sortBy').value;
+        chrome.storage.local.set({ sortBy: sortBy }, () => {
+            this.showMessage('排序方式设置已保存', 'success');
+        });
+    }
+
+    // 切换列表设置显示
+    toggleListSettings() {
+        const content = document.getElementById('listSettingsContent');
+        const btn = document.getElementById('listCollapseBtn');
+
+        if (content.style.display === 'none') {
+            content.style.display = 'block';
+            btn.textContent = '▼';
+        } else {
+            content.style.display = 'none';
+            btn.textContent = '▶';
+        }
+    }
+
+    // 导出列表数据
+    async exportListData() {
+        try {
+            if (!this.currentProductData || !this.currentProductData.products) {
+                this.showMessage('没有可导出的列表数据，请先采集列表商品', 'warning');
+                return;
+            }
+
+            // 清理列表数据，只保留有ASIN的商品
+            const validProducts = this.currentProductData.products.filter(product => {
+                return product.asin && product.asin.trim() !== '';
+            });
+
+            if (validProducts.length === 0) {
+                this.showMessage('没有有效的商品数据可导出（需要包含ASIN）', 'warning');
+                return;
+            }
+
+            // 清理每个商品的数据
+            const cleanedProducts = validProducts.map(product => this.cleanListProductData(product));
+
+            // 直接导出商品数组，不包含summary
+            const jsonData = JSON.stringify(cleanedProducts, null, 2);
+
+            // 生成文件名
+            const brandFilter = this.currentProductData.filters?.brandFilter || '';
+            const fileIdentifier = brandFilter ? brandFilter.replace(/[^a-zA-Z0-9]/g, '_') : 'list';
+            const filename = `amazon_list_${fileIdentifier}_${this.getDateString()}.json`;
+
+            // 创建下载链接
+            const blob = new Blob([jsonData], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            // 创建临时下载链接
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // 清理URL
+            URL.revokeObjectURL(url);
+
+            this.showMessage(`成功导出 ${cleanedProducts.length} 个有效商品数据`, 'success');
+
+        } catch (error) {
+            console.error('导出列表数据失败:', error);
+            this.showMessage('导出列表数据失败: ' + error.message, 'error');
+        }
+    }
+
+    // 清理单个列表商品数据
+    cleanListProductData(product) {
+        const cleanData = {};
+
+        // 必需字段
+        if (product.asin) cleanData.asin = product.asin;
+        if (product.title) cleanData.title = product.title;
+
+        // 基础信息
+        if (product.brand) cleanData.brand = product.brand;
+        if (product.price) cleanData.price = product.price;
+        if (product.rating) cleanData.rating = product.rating;
+        if (product.reviewCount) cleanData.reviewCount = product.reviewCount;
+
+        // 链接信息 - 添加联盟标识
+        if (product.url) {
+            cleanData.url = this.addAffiliateTagToUrl(product.url);
+        }
+
+        // 图片
+        if (product.image) cleanData.image = product.image;
+
+        // 标识
+        if (product.isPrime !== undefined) cleanData.isPrime = product.isPrime;
+        if (product.isBestSeller !== undefined) cleanData.isBestSeller = product.isBestSeller;
+
+        // 元数据
+        if (product.extractedAt) cleanData.extractedAt = product.extractedAt;
+        if (product.sourceIndex !== undefined) cleanData.sourceIndex = product.sourceIndex;
+
+        return cleanData;
+    }
+
+    // 添加联盟标识到URL
+    addAffiliateTagToUrl(url) {
+        try {
+            const affiliateTag = document.getElementById('affiliateTag').value.trim();
+            if (affiliateTag && url) {
+                const urlObj = new URL(url);
+                urlObj.searchParams.set('tag', affiliateTag);
+                return urlObj.toString();
+            }
+            return url;
+        } catch (error) {
+            console.warn('添加联盟标识失败:', error);
+            return url;
+        }
+    }
+
+    // 设置页面变化监听
+    setupPageChangeListener() {
+        console.log('ZonGrabber: 设置页面变化监听');
+
+        // 监听来自background的页面变化通知
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            if (message.action === 'pageTypeChanged') {
+                console.log('ZonGrabber: 收到页面变化通知', message);
+                this.handlePageTypeChanged(message.pageType, message.url);
+            }
+        });
+
+        // 定期检查页面变化（备用方案）
+        this.pageCheckInterval = setInterval(() => {
+            this.checkPageStatusSilently();
+        }, 2000); // 每2秒检查一次
+    }
+
+    // 处理页面类型变化
+    handlePageTypeChanged(newPageType, newUrl) {
+        console.log('ZonGrabber: 处理页面类型变化', {
+            from: this.currentPageType,
+            to: newPageType,
+            url: newUrl
+        });
+
+        if (this.currentPageType !== newPageType) {
+            this.currentPageType = newPageType;
+            this.updateUIForPageType(newPageType);
+            this.updateStatusForPageType(newPageType);
+        }
+    }
+
+    // 静默检查页面状态（不显示错误）
+    async checkPageStatusSilently() {
+        try {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const currentTab = tabs[0];
+
+            if (!currentTab) return;
+
+            const pageType = this.getPageType(currentTab.url);
+
+            // 只在页面类型真正改变时更新UI
+            if (this.currentPageType !== pageType) {
+                console.log('ZonGrabber: 检测到页面类型变化', {
+                    from: this.currentPageType,
+                    to: pageType,
+                    url: currentTab.url
+                });
+
+                this.handlePageTypeChanged(pageType, currentTab.url);
+            }
+        } catch (error) {
+            // 静默处理错误，不显示给用户
+            console.log('ZonGrabber: 静默页面检查失败', error);
+        }
+    }
+
+    // 根据页面类型更新状态文字
+    updateStatusForPageType(pageType) {
+        if (pageType === 'product') {
+            this.updateStatus('ready', '准备采集单品');
+        } else if (['search', 'category', 'store'].includes(pageType)) {
+            this.updateStatus('ready', '准备采集列表');
+        } else if (pageType === 'unknown') {
+            this.updateStatus('error', '请打开亚马逊页面');
+        }
+    }
+
+    // 清理资源
+    cleanup() {
+        console.log('ZonGrabber: 清理资源');
+        if (this.pageCheckInterval) {
+            clearInterval(this.pageCheckInterval);
+            this.pageCheckInterval = null;
+        }
     }
 }
 

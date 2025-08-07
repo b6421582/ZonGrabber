@@ -14,7 +14,7 @@
                 <img src="logo.png" alt="ZonGrabber">
                 <h1>ZonGrabber</h1>
             </div>
-            <div class="version">v1.0.0</div>
+            <div class="version">v1.4.0</div>
         </header>
 
         <!-- 主要内容区域 -->
@@ -75,11 +75,83 @@
                 </div>
             </div>
 
+            <!-- 列表采集设置区域 -->
+            <div class="list-settings-section" id="listSettingsSection" style="display: none;">
+                <div class="settings-header">
+                    <h3>📋 列表采集设置</h3>
+                    <button class="collapse-btn" id="listCollapseBtn">▼</button>
+                </div>
+                <div class="settings-content" id="listSettingsContent">
+                    <div class="setting-item">
+                        <label for="minSales">最低销量 (评论数):</label>
+                        <div class="input-group">
+                            <input type="number" id="minSales" placeholder="例如: 10" min="0" value="10" />
+                            <button id="saveMinSalesBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>📊 评论数少于此值的商品将被过滤</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="minListRating">最低评分:</label>
+                        <div class="input-group">
+                            <input type="number" id="minListRating" placeholder="3.5" step="0.1" min="1" max="5" value="3.5" />
+                            <button id="saveMinListRatingBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>⭐ 评分低于此值的商品将被过滤</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="minReviews">最低评论数:</label>
+                        <div class="input-group">
+                            <input type="number" id="minReviews" placeholder="例如: 5" min="0" value="5" />
+                            <button id="saveMinReviewsBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>💬 评论数少于此值的商品将被过滤</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="brandFilter">品牌筛选:</label>
+                        <div class="input-group">
+                            <input type="text" id="brandFilter" placeholder="例如: Contigo" />
+                            <button id="saveBrandFilterBtn" class="btn btn-small">保存</button>
+                        </div>
+                        <div class="setting-note">
+                            <small>🏷️ 只采集包含此品牌名称的商品</small>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="sortBy">排序方式:</label>
+                        <div class="input-group">
+                            <select id="sortBy">
+                                <option value="sales">按销量排序 (评论数)</option>
+                                <option value="rating">按评分排序</option>
+                                <option value="price">按价格排序 (低到高)</option>
+                                <option value="priceDesc">按价格排序 (高到低)</option>
+                            </select>
+                            <button id="saveSortByBtn" class="btn btn-small">保存</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-item">
+                        <div class="setting-note">
+                            <small>📋 <strong>筛选条件</strong>: 销量达标 + 评分达标 + 评论数达标 + 品牌匹配</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 操作按钮区域 -->
             <div class="action-section">
                 <button class="btn btn-primary" id="extractBtn">
-                    <span class="btn-icon">📊</span>
-                    采集商品数据
+                    <span class="btn-icon" id="extractBtnIcon">📊</span>
+                    <span id="extractBtnText">采集商品数据</span>
                 </button>
                 <button class="btn btn-secondary" id="refreshBtn">
                     <span class="btn-icon">🔄</span>
@@ -228,9 +300,9 @@
         <!-- 底部工具栏 -->
         <footer class="footer">
             <div class="export-section">
-                <button class="btn btn-export" id="exportJsonBtn">
-                    <span class="btn-icon">📥</span>
-                    导出JSON数据
+                <button class="btn btn-export" id="exportBtn">
+                    <span class="btn-icon" id="exportBtnIcon">📥</span>
+                    <span id="exportBtnText">导出商品数据</span>
                 </button>
             </div>
         </footer>

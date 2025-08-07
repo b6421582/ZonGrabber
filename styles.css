@@ -12,14 +12,19 @@ body {
     line-height: 1.4;
     color: #333;
     background: #f8f9fa;
+    margin: 0;
+    padding: 0;
 }
 
 .container {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    max-width: 400px;
+    width: 100%;
+    min-width: 320px;
+    max-width: 420px;
     margin: 0 auto;
+    overflow: hidden;
 }
 
 /* 头部样式 */
@@ -57,8 +62,10 @@ body {
 /* 主内容区域 */
 .main-content {
     flex: 1;
-    padding: 16px;
+    padding: 12px;
     overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
 }
 
 /* 状态栏 */
@@ -101,16 +108,19 @@ body {
 .btn {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
+    gap: 6px;
+    padding: 10px 14px;
     border: none;
     border-radius: 6px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
     text-decoration: none;
     justify-content: center;
+    white-space: nowrap;
+    box-sizing: border-box;
+    min-height: 38px;
 }
 
 .btn:hover {
@@ -156,7 +166,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
+    padding: 0 2px;
 }
 
 /* 商品预览 */
@@ -416,8 +427,9 @@ body {
 }
 
 .settings-content {
-    padding: 16px;
+    padding: 12px;
     transition: all 0.3s ease;
+    box-sizing: border-box;
 }
 
 .settings-content.collapsed {
@@ -425,7 +437,8 @@ body {
 }
 
 .setting-item {
-    margin-bottom: 12px;
+    margin-bottom: 14px;
+    width: 100%;
 }
 
 .setting-item label {
@@ -434,43 +447,56 @@ body {
     font-size: 12px;
     font-weight: 500;
     color: #495057;
+    word-wrap: break-word;
+    line-height: 1.3;
 }
 
 .input-group {
     display: flex;
-    gap: 8px;
-    align-items: center;
+    gap: 6px;
+    align-items: stretch;
+    width: 100%;
 }
 
-.input-group input {
+.input-group input,
+.input-group select {
     flex: 1;
-    padding: 8px 12px;
+    min-width: 0;
+    padding: 8px 10px;
     border: 1px solid #ced4da;
     border-radius: 4px;
     font-size: 12px;
     background: white;
+    box-sizing: border-box;
 }
 
-.input-group input:focus {
+.input-group input:focus,
+.input-group select:focus {
     outline: none;
     border-color: #007bff;
     box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 }
 
 .btn-small {
-    padding: 8px 12px;
+    padding: 8px 10px;
     font-size: 11px;
-    min-width: auto;
+    min-width: 50px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    border-radius: 4px;
 }
 
 .setting-note {
     margin-top: 6px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
 .setting-note small {
     color: #6c757d;
     font-size: 11px;
     line-height: 1.3;
+    display: block;
 }
 
 /* 联盟链接样式 */
@@ -539,17 +565,21 @@ body {
     background: linear-gradient(135deg, #28a745, #20c997);
     color: white;
     border: none;
-    padding: 12px 20px;
-    font-size: 14px;
+    padding: 10px 16px;
+    font-size: 13px;
     font-weight: 600;
     border-radius: 6px;
     width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 6px;
     transition: all 0.3s ease;
     box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
+    min-height: 38px;
+    white-space: nowrap;
+    box-sizing: border-box;
+    cursor: pointer;
 }
 
 .btn-export:hover {
@@ -771,4 +801,219 @@ body {
 .message-toast.warning {
     background: #ffc107;
     color: #333;
+}
+
+/* 列表采集设置样式 */
+.list-settings-section {
+    background: white;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    border-left: 4px solid #007bff;
+}
+
+.list-settings-section .settings-header {
+    background: linear-gradient(135deg, #007bff, #0056b3);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+}
+
+.list-settings-section .settings-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.list-settings-section .settings-content {
+    padding: 12px;
+    box-sizing: border-box;
+}
+
+.list-settings-section .setting-item {
+    margin-bottom: 14px;
+    width: 100%;
+}
+
+.list-settings-section .setting-item:last-child {
+    margin-bottom: 0;
+}
+
+.list-settings-section .input-group select {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    background: white;
+}
+
+.list-settings-section .input-group select:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+/* 列表采集按钮样式 */
+#listExtractBtn {
+    background: linear-gradient(135deg, #007bff, #0056b3);
+    border: none;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+#listExtractBtn:hover {
+    background: linear-gradient(135deg, #0056b3, #004085);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+}
+
+#listExtractBtn:active {
+    transform: translateY(0);
+}
+
+/* 状态指示器增强 */
+.status-dot.ready {
+    background: #28a745;
+}
+
+/* 导出按钮区域 */
+.export-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 2px;
+}
+
+/* 底部工具栏 */
+.footer {
+    padding: 12px;
+    background: white;
+    border-top: 1px solid #e9ecef;
+    box-sizing: border-box;
+}
+
+#exportListBtn {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    border: none;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+#exportListBtn:hover {
+    background: linear-gradient(135deg, #20c997, #17a2b8);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+}
+
+#exportListBtn:active {
+    transform: translateY(0);
+}
+
+/* 更新原有导出按钮文本 */
+#exportJsonBtn .btn-icon::after {
+    content: " 商品";
+}
+
+#exportListBtn .btn-icon::after {
+    content: " 列表";
+}
+
+/* 响应式调整 */
+@media (max-width: 380px) {
+    .container {
+        min-width: 300px;
+    }
+
+    .main-content {
+        padding: 8px;
+    }
+
+    .settings-content,
+    .list-settings-section .settings-content {
+        padding: 8px;
+    }
+
+    .input-group,
+    .list-settings-section .input-group {
+        flex-direction: column;
+        gap: 6px;
+        align-items: stretch;
+    }
+
+    .input-group input,
+    .input-group select,
+    .list-settings-section .input-group input,
+    .list-settings-section .input-group select {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .btn-small {
+        width: 100%;
+        min-width: auto;
+    }
+
+    .export-section {
+        gap: 6px;
+    }
+
+    .footer {
+        padding: 8px;
+    }
+
+    .action-section {
+        padding: 0;
+    }
+
+    .btn {
+        font-size: 12px;
+        padding: 8px 12px;
+    }
+
+    .btn-export {
+        font-size: 12px;
+        padding: 8px 12px;
+    }
+
+    .setting-item label {
+        font-size: 11px;
+    }
+}
+
+/* 中等屏幕调整 */
+@media (max-width: 420px) and (min-width: 381px) {
+    .input-group {
+        gap: 4px;
+    }
+
+    .btn-small {
+        padding: 6px 8px;
+        font-size: 10px;
+        min-width: 45px;
+    }
 }

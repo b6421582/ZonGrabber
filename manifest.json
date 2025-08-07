@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ZonGrabber",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "description": "亚马逊商品信息采集工具，支持侧边栏模式采集商品详情、价格、评论等信息",
   "permissions": [
     "activeTab",

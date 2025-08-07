@@ -92,8 +92,15 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         sendResponse({ error: error.message });
       });
       break;
-
-
+    case 'extractListProducts':
+      extractListProducts(request.filters || {}).then(data => {
+        console.log('List products extracted successfully:', data);
+        sendResponse(data);
+      }).catch(error => {
+        console.error('List products extraction failed:', error);
+        sendResponse({ error: error.message });
+      });
+      break;
     case 'showNotification':
       showNotification(request.message);
       sendResponse({ success: true });
@@ -1040,4 +1047,477 @@ function showNotification(message) {
       notification.parentNode.removeChild(notification);
     }
   }, 3000);
+}
+
+// ==================== 列表页面商品采集功能 ====================
+
+// 列表页面商品选择器配置
+const LIST_SELECTORS = {
+  // 商品容器选择器 - 亚马逊的多种列表结构
+  productContainers: [
+    '[data-component-type="s-search-result"]',  // 主要搜索结果
+    '.s-result-item',                           // 备用搜索结果
+    '.s-widget-container',                      // 小部件容器
+    '.a-section.a-spacing-base',                // 通用商品容器
+    '[data-asin]:not([data-asin=""])',          // 包含有效ASIN的元素
+    '.sg-col-inner',                            // 网格列容器
+    '.s-card-container'                         // 卡片容器
+  ],
+
+  // 商品标题选择器 - 多种标题结构
+  title: [
+    'h2.a-size-base-plus span',                 // 标准标题结构
+    'h2 a span',                                // 链接内的span
+    'h2.s-size-mini span',                      // 小尺寸标题
+    'h2 .a-link-normal span',                   // 普通链接span
+    '.a-size-base-plus',                        // 基础大小标题
+    '.a-size-mini .a-link-normal span',         // 小标题链接
+    'h2[aria-label] span',                      // 带aria-label的标题
+    '.s-title-instructions-style span',         // 特殊样式标题
+    'h2.a-color-base span'                      // 基础颜色标题
+  ],
+
+  price: [
+    '.a-price .a-offscreen',
+    '.a-price-whole',
+    '.a-price .a-price-symbol'
+  ],
+
+  rating: [
+    '.a-icon-alt',
+    '[aria-label*="stars"]'
+  ],
+
+  reviewCount: [
+    '.a-size-base',
+    'a[href*="#customerReviews"]'
+  ],
+
+  image: [
+    '.s-image',
+    '.a-dynamic-image',
+    'img[data-image-latency]'
+  ],
+
+  link: [
+    'h2 a',
+    '.a-link-normal'
+  ]
+};
+
+// 主要的列表商品提取函数
+async function extractListProducts(filters = {}) {
+  return new Promise(async (resolve, reject) => {
+    const timeout = setTimeout(() => {
+      console.error('列表商品提取超时');
+      reject(new Error('列表商品提取超时，请刷新页面后重试'));
+    }, 60000); // 60秒超时
+
+    try {
+      console.log('开始列表商品提取...', filters);
+
+      // 检查是否为列表页面
+      if (!isListPage()) {
+        throw new Error('当前页面不是亚马逊列表页面');
+      }
+
+      // 等待页面完全加载
+      await waitForPageLoad();
+      console.log('页面加载完成，开始提取列表商品...');
+
+      const products = [];
+      const productElements = getProductElements();
+
+      console.log(`找到 ${productElements.length} 个商品元素`);
+
+      // 提取每个商品的数据
+      for (let i = 0; i < productElements.length; i++) {
+        const element = productElements[i];
+        try {
+          const product = await extractProductFromListItem(element, i);
+          if (product && product.asin) {
+            // 应用过滤条件
+            if (passesFilters(product, filters)) {
+              products.push(product);
+              console.log(`商品 ${i + 1} 提取成功并通过过滤:`, product.title);
+            } else {
+              console.log(`商品 ${i + 1} 被过滤:`, product.title);
+            }
+          }
+        } catch (error) {
+          console.warn(`提取商品 ${i + 1} 失败:`, error);
+        }
+      }
+
+      // 排序商品
+      const sortedProducts = sortProducts(products, filters.sortBy || 'sales');
+
+      const result = {
+        products: sortedProducts,
+        totalFound: productElements.length,
+        totalFiltered: sortedProducts.length,
+        filters: filters,
+        extractedAt: new Date().toISOString(),
+        pageType: 'list'
+      };
+
+      console.log('列表商品提取完成:', result);
+      clearTimeout(timeout);
+      resolve(result);
+    } catch (error) {
+      console.error('列表商品提取失败:', error);
+      clearTimeout(timeout);
+      reject(error);
+    }
+  });
+}
+
+// 检查是否为列表页面
+function isListPage() {
+  const url = window.location.href;
+  return url.includes('/s?') ||
+         url.includes('/gp/search/') ||
+         url.includes('/b/') ||
+         url.includes('/stores/') ||
+         document.querySelector('[data-component-type="s-search-result"]') !== null;
+}
+
+// 获取页面中的商品元素
+function getProductElements() {
+  let elements = [];
+
+  // 尝试不同的选择器
+  for (const selector of LIST_SELECTORS.productContainers) {
+    elements = document.querySelectorAll(selector);
+    if (elements.length > 0) {
+      console.log(`使用选择器 "${selector}" 找到 ${elements.length} 个商品`);
+      break;
+    }
+  }
+
+  // 过滤掉无效的元素
+  return Array.from(elements).filter(element => {
+    // 确保元素可见且包含基本信息
+    return element.offsetHeight > 0 &&
+           (element.querySelector('h2') || element.querySelector('.a-size-base-plus'));
+  });
+}
+
+// 从列表项中提取单个商品数据
+async function extractProductFromListItem(element, index) {
+  try {
+    console.log(`开始提取商品 ${index + 1}...`);
+
+    const product = {
+      asin: extractASINFromListElement(element),
+      title: extractTextFromListElement(element, LIST_SELECTORS.title),
+      brand: extractBrandFromListElement(element),
+      price: extractPriceFromListElement(element),
+      rating: extractRatingFromListElement(element),
+      reviewCount: extractReviewCountFromListElement(element),
+      image: extractImageFromListElement(element),
+      url: extractUrlFromListElement(element),
+      isPrime: checkPrimeFromListElement(element),
+      isBestSeller: checkBestSellerFromListElement(element),
+      extractedAt: new Date().toISOString(),
+      sourceIndex: index
+    };
+
+    console.log(`商品 ${index + 1} 基础数据:`, {
+      asin: product.asin,
+      title: product.title?.substring(0, 50) + '...',
+      brand: product.brand,
+      price: product.price,
+      rating: product.rating,
+      reviewCount: product.reviewCount,
+      url: product.url
+    });
+
+    return product;
+  } catch (error) {
+    console.error(`提取商品 ${index + 1} 失败:`, error);
+    return null;
+  }
+}
+
+// 从列表元素中提取ASIN
+function extractASINFromListElement(element) {
+  // 方法1: 从data-asin属性
+  const asin = element.getAttribute('data-asin');
+  if (asin) {
+    return asin;
+  }
+
+  // 方法2: 从链接URL中提取
+  const link = element.querySelector('a[href*="/dp/"]');
+  if (link) {
+    const href = link.getAttribute('href');
+    const match = href.match(/\/dp\/([A-Z0-9]{10})/i);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  // 方法3: 从其他属性中查找
+  const dataUuid = element.getAttribute('data-uuid');
+  if (dataUuid && dataUuid.length === 10) {
+    return dataUuid;
+  }
+
+  return '';
+}
+
+// 从列表元素中提取文本（通用函数）
+function extractTextFromListElement(element, selectors) {
+  for (const selector of selectors) {
+    try {
+      const textElement = element.querySelector(selector);
+      if (textElement) {
+        const text = textElement.textContent?.trim();
+        if (text && text !== '') {
+          return text;
+        }
+      }
+    } catch (error) {
+      console.warn('选择器错误:', selector, error);
+    }
+  }
+  return '';
+}
+
+// 从列表元素中提取品牌
+function extractBrandFromListElement(element) {
+  // 尝试从专门的品牌元素提取
+  const brandSelectors = [
+    '.a-size-base-plus[data-cy="brand-name"]',
+    '.s-brand-name',
+    '.a-link-normal[data-attribute="brand"]',
+    '.brand-name',
+    'span[data-component-type="s-brand-name"]'
+  ];
+
+  for (const selector of brandSelectors) {
+    const brandElement = element.querySelector(selector);
+    if (brandElement) {
+      const brandText = brandElement.textContent?.trim();
+      if (brandText && brandText !== '') {
+        return brandText;
+      }
+    }
+  }
+
+  // 如果没有找到专门的品牌元素，尝试从标题中智能提取
+  const title = extractTextFromListElement(element, LIST_SELECTORS.title);
+  if (title) {
+    // 常见品牌名称模式匹配
+    const brandPatterns = [
+      /^([A-Z][a-zA-Z]+)\s+/,  // 首字母大写的单词
+      /^([A-Z]{2,})\s+/,       // 全大写的缩写
+      /^(\w+)\s+-\s+/          // 品牌名 - 产品名格式
+    ];
+
+    for (const pattern of brandPatterns) {
+      const match = title.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    // 如果没有匹配到模式，返回第一个词（但要过滤一些常见的非品牌词）
+    const words = title.split(' ');
+    if (words.length > 0) {
+      const firstWord = words[0];
+      const nonBrandWords = ['The', 'A', 'An', 'New', 'Best', 'Top', 'Premium'];
+      if (!nonBrandWords.includes(firstWord)) {
+        return firstWord;
+      }
+    }
+  }
+
+  return '';
+}
+
+// 从列表元素中提取价格
+function extractPriceFromListElement(element) {
+  const priceText = extractTextFromListElement(element, LIST_SELECTORS.price);
+  if (priceText) {
+    // 提取数字部分
+    const priceMatch = priceText.match(/[\d,]+\.?\d*/);
+    return priceMatch ? priceMatch[0] : '';
+  }
+  return '';
+}
+
+// 从列表元素中提取评分
+function extractRatingFromListElement(element) {
+  const ratingElement = element.querySelector('.a-icon-alt');
+  if (ratingElement) {
+    const ratingText = ratingElement.getAttribute('title') || ratingElement.textContent;
+    if (ratingText) {
+      const ratingMatch = ratingText.match(/[\d.]+/);
+      return ratingMatch ? parseFloat(ratingMatch[0]) : 0;
+    }
+  }
+  return 0;
+}
+
+// 从列表元素中提取评论数
+function extractReviewCountFromListElement(element) {
+  // 查找评论数链接
+  const reviewLink = element.querySelector('a[href*="#customerReviews"]');
+  if (reviewLink) {
+    const reviewText = reviewLink.textContent;
+    if (reviewText) {
+      const countMatch = reviewText.match(/[\d,]+/);
+      return countMatch ? parseInt(countMatch[0].replace(',', '')) : 0;
+    }
+  }
+
+  // 备用方法：查找包含数字的小文本
+  const smallTexts = element.querySelectorAll('.a-size-base');
+  for (const text of smallTexts) {
+    const content = text.textContent;
+    if (content && content.match(/^\d+,?\d*$/)) {
+      return parseInt(content.replace(',', ''));
+    }
+  }
+
+  return 0;
+}
+
+// 从列表元素中提取图片
+function extractImageFromListElement(element) {
+  const img = element.querySelector('.s-image, .a-dynamic-image, img[data-image-latency]');
+  if (img) {
+    return img.getAttribute('src') || img.getAttribute('data-src') || '';
+  }
+  return '';
+}
+
+// 从列表元素中提取URL
+function extractUrlFromListElement(element) {
+  const linkSelectors = [
+    'h2 a',
+    '.a-link-normal',
+    'a[href*="/dp/"]',
+    '.s-title-instructions-style a'
+  ];
+
+  for (const selector of linkSelectors) {
+    const link = element.querySelector(selector);
+    if (link) {
+      const href = link.getAttribute('href');
+      if (href) {
+        let fullUrl;
+        // 如果是相对链接，转换为绝对链接
+        if (href.startsWith('/')) {
+          fullUrl = window.location.origin + href;
+        } else {
+          fullUrl = href;
+        }
+
+        // 清理URL，只保留到商品ID
+        return cleanProductUrl(fullUrl);
+      }
+    }
+  }
+  return '';
+}
+
+// 清理商品URL，只保留基础部分
+function cleanProductUrl(url) {
+  try {
+    const urlObj = new URL(url);
+
+    // 提取ASIN
+    const asinMatch = url.match(/\/dp\/([A-Z0-9]{10})/i);
+    if (asinMatch) {
+      const asin = asinMatch[1];
+      // 构建清洁的URL，只保留到商品ID
+      return `${urlObj.origin}/dp/${asin}/`;
+    }
+
+    return url;
+  } catch (error) {
+    console.warn('URL清理失败:', error);
+    return url;
+  }
+}
+
+// 检查是否为Prime商品
+function checkPrimeFromListElement(element) {
+  return element.querySelector('.a-icon-prime, [aria-label*="Prime"]') !== null;
+}
+
+// 检查是否为Best Seller
+function checkBestSellerFromListElement(element) {
+  const badges = element.querySelectorAll('.a-badge-text, [data-hook="badge-text"]');
+  for (const badge of badges) {
+    const text = badge.textContent;
+    if (text && (text.includes('Best Seller') || text.includes('#1'))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// 过滤函数
+function passesFilters(product, filters) {
+  // 销量过滤（使用评论数作为销量指标）
+  if (filters.minSales && product.reviewCount < filters.minSales) {
+    console.log(`商品被销量过滤: ${product.reviewCount} < ${filters.minSales}`);
+    return false;
+  }
+
+  // 评分过滤
+  if (filters.minRating && product.rating < filters.minRating) {
+    console.log(`商品被评分过滤: ${product.rating} < ${filters.minRating}`);
+    return false;
+  }
+
+  // 评论数过滤
+  if (filters.minReviews && product.reviewCount < filters.minReviews) {
+    console.log(`商品被评论数过滤: ${product.reviewCount} < ${filters.minReviews}`);
+    return false;
+  }
+
+  // 品牌过滤
+  if (filters.brandFilter && filters.brandFilter.trim() !== '') {
+    const brandFilter = filters.brandFilter.toLowerCase().trim();
+    const productBrand = (product.brand || '').toLowerCase();
+    const productTitle = (product.title || '').toLowerCase();
+
+    if (!productBrand.includes(brandFilter) && !productTitle.includes(brandFilter)) {
+      console.log(`商品被品牌过滤: "${product.brand}" 不包含 "${filters.brandFilter}"`);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// 排序函数
+function sortProducts(products, sortBy = 'sales') {
+  return products.sort((a, b) => {
+    switch (sortBy) {
+      case 'sales':
+        // 按评论数排序（作为销量指标）
+        return (b.reviewCount || 0) - (a.reviewCount || 0);
+      case 'rating':
+        // 按评分排序
+        return (b.rating || 0) - (a.rating || 0);
+      case 'price':
+        // 按价格排序（低到高）
+        const priceA = parseFloat((a.price || '0').replace(',', ''));
+        const priceB = parseFloat((b.price || '0').replace(',', ''));
+        return priceA - priceB;
+      case 'priceDesc':
+        // 按价格排序（高到低）
+        const priceA2 = parseFloat((a.price || '0').replace(',', ''));
+        const priceB2 = parseFloat((b.price || '0').replace(',', ''));
+        return priceB2 - priceA2;
+      default:
+        return 0;
+    }
+  });
 }
